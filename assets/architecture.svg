@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="650" viewBox="0 0 1400 650" role="img" aria-labelledby="title desc">
+  <title id="title">Release Proof MCP verification chain</title>
+  <desc id="desc">Source commit to review to GitHub OIDC build identity to attestation to registry digest to Kubernetes imageID to verdict receipt, constrained by server-side policy.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070b14"/>
+      <stop offset="1" stop-color="#0d1423"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="0.5" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#94a3b8" stroke-opacity="0.04"/>
+    </pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 8 4 0 8Z" fill="#67e8f9"/>
+    </marker>
+    <marker id="arrow-violet" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 8 4 0 8Z" fill="#a78bfa"/>
+    </marker>
+  </defs>
+
+  <rect width="1400" height="650" rx="24" fill="url(#background)"/>
+  <rect width="1400" height="650" rx="24" fill="url(#grid)"/>
+  <rect x="1" y="1" width="1398" height="648" rx="23" fill="none" stroke="#334155" stroke-opacity="0.6"/>
+  <rect x="64" y="42" width="44" height="4" rx="2" fill="url(#accent)"/>
+
+  <g font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <text x="64" y="82" fill="#f8fafc" font-size="25" font-weight="700" letter-spacing="1.2">THE VERIFICATION CHAIN</text>
+    <text x="64" y="110" fill="#8492a8" font-size="14">Cryptographic identity and digest relationships, qualified by review, release, and runtime evidence.</text>
+    <g transform="translate(1160 57)">
+      <rect width="176" height="32" rx="16" fill="#0d282b" stroke="#285755"/>
+      <circle cx="18" cy="16" r="4" fill="#5eead4"/>
+      <text x="31" y="20" fill="#99f6e4" font-size="11" font-weight="650" letter-spacing="1.2">READ-ONLY / STDIO</text>
+    </g>
+
+    <!-- Top-row connectors -->
+    <g fill="none" stroke="#67e8f9" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M364 210H384"/>
+      <path d="M688 210H708"/>
+      <path d="M1012 210H1032"/>
+      <path d="M1186 284V372"/>
+    </g>
+    <g fill="#0b1220" stroke="#26364c" stroke-width="1.5">
+      <rect x="64" y="140" width="300" height="144" rx="18"/>
+      <rect x="388" y="140" width="300" height="144" rx="18"/>
+      <rect x="712" y="140" width="300" height="144" rx="18"/>
+      <rect x="1036" y="140" width="300" height="144" rx="18"/>
+    </g>
+    <rect x="64" y="140" width="300" height="3" rx="1.5" fill="#5eead4"/>
+    <rect x="388" y="140" width="300" height="3" rx="1.5" fill="#5eead4"/>
+    <rect x="712" y="140" width="300" height="3" rx="1.5" fill="#67e8f9"/>
+    <rect x="1036" y="140" width="300" height="3" rx="1.5" fill="#67e8f9"/>
+
+    <!-- 01 -->
+    <circle cx="94" cy="171" r="15" fill="#0d282b" stroke="#285755"/>
+    <text x="94" y="176" text-anchor="middle" fill="#5eead4" font-size="12" font-weight="700">01</text>
+    <text x="120" y="177" fill="#f1f5f9" font-size="18" font-weight="650">Source commit</text>
+    <text x="88" y="218" fill="#b2bdd0" font-size="14">Repository commit lookup</text>
+    <text x="88" y="242" fill="#b2bdd0" font-size="14">Exact full-SHA equality</text>
+    <text x="88" y="265" fill="#64748b" font-size="11" letter-spacing="1">EXPECTED COMMIT</text>
+
+    <!-- 02 -->
+    <circle cx="418" cy="171" r="15" fill="#0d282b" stroke="#285755"/>
+    <text x="418" y="176" text-anchor="middle" fill="#5eead4" font-size="12" font-weight="700">02</text>
+    <text x="444" y="177" fill="#f1f5f9" font-size="18" font-weight="650">Reviewed change</text>
+    <text x="412" y="211" fill="#b2bdd0" font-size="14">PR state + current approvals</text>
+    <text x="412" y="234" fill="#b2bdd0" font-size="14">Allowed numeric reviewer IDs</text>
+    <text x="412" y="257" fill="#b2bdd0" font-size="14">Exact-head or merged-PR mode</text>
+    <text x="412" y="277" fill="#64748b" font-size="10" letter-spacing="0.8">MERGE COMMIT REVIEW IS NOT IMPLIED</text>
+
+    <!-- 03 -->
+    <circle cx="742" cy="171" r="15" fill="#0c2733" stroke="#285363"/>
+    <text x="742" y="176" text-anchor="middle" fill="#67e8f9" font-size="12" font-weight="700">03</text>
+    <text x="768" y="177" fill="#f1f5f9" font-size="18" font-weight="650">OIDC build identity</text>
+    <text x="736" y="211" fill="#b2bdd0" font-size="14">Signer workflow + signer digest</text>
+    <text x="736" y="234" fill="#b2bdd0" font-size="14">Source SHA/ref + run identity</text>
+    <text x="736" y="257" fill="#b2bdd0" font-size="14">Successful run + release approval</text>
+    <text x="736" y="277" fill="#64748b" font-size="10" letter-spacing="0.8">GITHUB-HOSTED / ATTEMPT 1 ONLY</text>
+
+    <!-- 04 -->
+    <circle cx="1066" cy="171" r="15" fill="#0c2733" stroke="#285363"/>
+    <text x="1066" y="176" text-anchor="middle" fill="#67e8f9" font-size="12" font-weight="700">04</text>
+    <text x="1092" y="177" fill="#f1f5f9" font-size="18" font-weight="650">Attestation</text>
+    <text x="1060" y="218" fill="#b2bdd0" font-size="14">Sigstore + DSSE + SLSA v1</text>
+    <text x="1060" y="242" fill="#b2bdd0" font-size="14">Exact in-toto subject digest</text>
+    <text x="1060" y="265" fill="#64748b" font-size="11" letter-spacing="1">GH ATTESTATION VERIFY</text>
+
+    <rect x="1208" y="308" width="106" height="25" rx="12.5" fill="#0c2733"/>
+    <text x="1261" y="325" text-anchor="middle" fill="#a5f3fc" font-size="10" letter-spacing="0.8">DIGEST BINDING</text>
+
+    <!-- Bottom-row connectors run right to left -->
+    <g fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#arrow-violet)">
+      <path d="M1036 452H1016"/>
+      <path d="M712 452H692"/>
+    </g>
+    <g fill="#0b1220" stroke="#26364c" stroke-width="1.5">
+      <rect x="1036" y="380" width="300" height="144" rx="18"/>
+      <rect x="712" y="380" width="300" height="144" rx="18"/>
+      <rect x="388" y="380" width="300" height="144" rx="18"/>
+    </g>
+    <rect x="1036" y="380" width="300" height="3" rx="1.5" fill="#67e8f9"/>
+    <rect x="712" y="380" width="300" height="3" rx="1.5" fill="#a78bfa"/>
+    <rect x="388" y="380" width="300" height="3" rx="1.5" fill="#a78bfa"/>
+
+    <!-- 05 -->
+    <circle cx="1066" cy="411" r="15" fill="#0c2733" stroke="#285363"/>
+    <text x="1066" y="416" text-anchor="middle" fill="#67e8f9" font-size="12" font-weight="700">05</text>
+    <text x="1092" y="417" fill="#f1f5f9" font-size="18" font-weight="650">Registry digest</text>
+    <text x="1060" y="451" fill="#b2bdd0" font-size="14">crane digest + manifest bytes</text>
+    <text x="1060" y="474" fill="#b2bdd0" font-size="14">Independent SHA-256 check</text>
+    <text x="1060" y="497" fill="#b2bdd0" font-size="14">Strict OCI index structure</text>
+    <text x="1060" y="517" fill="#64748b" font-size="10" letter-spacing="0.8">TAGS NEVER BECOME THE SUBJECT</text>
+
+    <!-- 06 -->
+    <circle cx="742" cy="411" r="15" fill="#1c1935" stroke="#484069"/>
+    <text x="742" y="416" text-anchor="middle" fill="#a78bfa" font-size="12" font-weight="700">06</text>
+    <text x="768" y="417" fill="#f1f5f9" font-size="18" font-weight="650">Kubernetes imageID</text>
+    <text x="736" y="451" fill="#b2bdd0" font-size="14">UID-owned Deployment / RS / Pod</text>
+    <text x="736" y="474" fill="#b2bdd0" font-size="14">Named, ready, running container</text>
+    <text x="736" y="497" fill="#b2bdd0" font-size="14">Direct or index-child digest match</text>
+    <text x="736" y="517" fill="#64748b" font-size="10" letter-spacing="0.8">TWO STABLE RUNTIME SNAPSHOTS</text>
+
+    <!-- 07 -->
+    <circle cx="418" cy="411" r="15" fill="#1c1935" stroke="#484069"/>
+    <text x="418" y="416" text-anchor="middle" fill="#a78bfa" font-size="12" font-weight="700">07</text>
+    <text x="444" y="417" fill="#f1f5f9" font-size="18" font-weight="650">Verdict receipt</text>
+    <text x="412" y="458" fill="#f1f5f9" font-size="16" font-weight="600">verified / failed / unknown</text>
+    <text x="412" y="485" fill="#b2bdd0" font-size="14">Evidence + effective policy + hash</text>
+    <text x="412" y="508" fill="#64748b" font-size="11" letter-spacing="0.8">OBSERVATION-WINDOW PROOF</text>
+
+    <!-- Operator policy -->
+    <rect x="64" y="380" width="300" height="144" rx="18" fill="#121329" stroke="#62558c" stroke-width="1.5" stroke-dasharray="5 5"/>
+    <path d="M92 402 105 407v11c0 8-5 15-13 18-8-3-13-10-13-18v-11Z" fill="none" stroke="#a78bfa" stroke-width="1.5"/>
+    <path d="m86 418 4 4 8-9" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="120" y="419" fill="#e9e4ff" font-size="17" font-weight="650">Server-side policy</text>
+    <text x="88" y="459" fill="#b9b1d3" font-size="13">Review + signer + release rules</text>
+    <text x="88" y="481" fill="#b9b1d3" font-size="13">Operator-selected profile and version</text>
+    <text x="88" y="503" fill="#b9b1d3" font-size="13">Optional independent Cosign check</text>
+    <text x="88" y="517" fill="#82799f" font-size="9.5" letter-spacing="0.7">NEVER CONTROLLED BY MCP ARGUMENTS</text>
+    <path d="M364 452H384" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#arrow-violet)"/>
+
+    <!-- Footer -->
+    <rect x="64" y="570" width="1272" height="1" fill="#26364c"/>
+    <circle cx="78" cy="606" r="5" fill="#5eead4"/>
+    <text x="94" y="611" fill="#cbd5e1" font-size="13"><tspan font-weight="650" fill="#f1f5f9">verified</tspan> requires every applicable check to pass.</text>
+    <circle cx="481" cy="606" r="5" fill="#fb7185"/>
+    <text x="497" y="611" fill="#cbd5e1" font-size="13"><tspan font-weight="650" fill="#fecdd3">failed</tspan> and <tspan font-weight="650" fill="#fecdd3">unknown</tspan> both mean NOT VERIFIED.</text>
+    <text x="1336" y="611" text-anchor="end" fill="#64748b" font-size="11" letter-spacing="0.9">NO MUTATION / NO ADMISSION CONTROL</text>
+  </g>
+</svg>

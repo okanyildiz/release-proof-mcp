@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title desc">
+  <title id="title">Release Proof MCP</title>
+  <desc id="desc">Prove production bytes from reviewed commits with a read-only evidence chain across GitHub Actions, GHCR, and Kubernetes.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070b14"/>
+      <stop offset="0.55" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#101426"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="0.52" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#172554"/>
+      <stop offset="1" stop-color="#0f3538"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#5eead4" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#5eead4" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#94a3b8" stroke-opacity="0.055" stroke-width="1"/>
+    </pattern>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.02 0 0 0 0 0.04 0 0 0 0 0.09 0 0 0 0.65 0" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="340" rx="24" fill="url(#background)"/>
+  <rect width="1200" height="340" rx="24" fill="url(#grid)"/>
+  <ellipse cx="995" cy="152" rx="240" ry="220" fill="url(#glow)"/>
+  <rect x="1" y="1" width="1198" height="338" rx="23" fill="none" stroke="#334155" stroke-opacity="0.55"/>
+  <rect x="24" y="0" width="1152" height="3" rx="1.5" fill="url(#accent)"/>
+
+  <g font-family="Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <g transform="translate(72 48)">
+      <path d="M10 0 19 3.5v8.2c0 5.8-3.8 10.7-9 12.3-5.2-1.6-9-6.5-9-12.3V3.5Z" fill="none" stroke="#5eead4" stroke-width="1.6"/>
+      <path d="m6 11.5 2.6 2.6 5.5-6" fill="none" stroke="#67e8f9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="32" y="16" fill="#94a3b8" font-size="12" font-weight="650" letter-spacing="2.4">SUPPLY-CHAIN EVIDENCE / MCP</text>
+    </g>
+
+    <text x="72" y="148" fill="#f8fafc" font-size="50" font-weight="750" letter-spacing="1.5">RELEASE PROOF MCP</text>
+    <text x="72" y="194" fill="#cbd5e1" font-size="21" font-weight="400">Prove production bytes from reviewed commits.</text>
+    <text x="72" y="225" fill="#7f8da3" font-size="14">A read-only verification chain from source to Kubernetes imageID.</text>
+
+    <g font-size="11" font-weight="650" letter-spacing="1.4">
+      <rect x="72" y="266" width="150" height="32" rx="16" fill="#0d282b" stroke="#285755"/>
+      <circle cx="90" cy="282" r="3.5" fill="#5eead4"/>
+      <text x="102" y="286" fill="#99f6e4">GITHUB OIDC</text>
+      <rect x="234" y="266" width="150" height="32" rx="16" fill="#0c2733" stroke="#285363"/>
+      <circle cx="252" cy="282" r="3.5" fill="#67e8f9"/>
+      <text x="264" y="286" fill="#a5f3fc">OCI DIGESTS</text>
+      <rect x="396" y="266" width="166" height="32" rx="16" fill="#1c1935" stroke="#484069"/>
+      <circle cx="414" cy="282" r="3.5" fill="#a78bfa"/>
+      <text x="426" y="286" fill="#d8ccff">K8S RUNTIME</text>
+      <rect x="574" y="266" width="160" height="32" rx="16" fill="#111b2c" stroke="#2b3a50"/>
+      <circle cx="592" cy="282" r="3.5" fill="#94a3b8"/>
+      <text x="604" y="286" fill="#cbd5e1">READ-ONLY</text>
+    </g>
+
+    <g filter="url(#soft-shadow)">
+      <path d="M986 70 1066 99v55c0 51-32 92-80 112-48-20-80-61-80-112V99Z" fill="url(#shield)" stroke="url(#accent)" stroke-width="2"/>
+      <path d="M986 84 1052 108v45c0 42-25 76-66 94-41-18-66-52-66-94v-45Z" fill="none" stroke="#94a3b8" stroke-opacity="0.16"/>
+      <path d="m951 159 24 24 47-55" fill="none" stroke="url(#accent)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <g fill="none" stroke-linecap="round">
+      <path d="M843 109h42c15 0 24 9 24 24v4" stroke="#334155" stroke-width="2"/>
+      <path d="M843 109h42c15 0 24 9 24 24v4" stroke="url(#accent)" stroke-width="2" stroke-dasharray="2 8"/>
+      <rect x="805" y="91" width="64" height="36" rx="18" transform="rotate(-12 837 109)" stroke="#5eead4" stroke-opacity="0.7" stroke-width="2"/>
+      <rect x="839" y="91" width="64" height="36" rx="18" transform="rotate(-12 871 109)" stroke="#67e8f9" stroke-opacity="0.7" stroke-width="2"/>
+      <path d="M1063 220v12c0 15-9 24-24 24h-44" stroke="#334155" stroke-width="2"/>
+      <path d="M1063 220v12c0 15-9 24-24 24h-44" stroke="url(#accent)" stroke-width="2" stroke-dasharray="2 8"/>
+      <rect x="938" y="238" width="64" height="36" rx="18" transform="rotate(12 970 256)" stroke="#a78bfa" stroke-opacity="0.65" stroke-width="2"/>
+      <rect x="972" y="238" width="64" height="36" rx="18" transform="rotate(12 1004 256)" stroke="#67e8f9" stroke-opacity="0.65" stroke-width="2"/>
+    </g>
+    <text x="1138" y="306" text-anchor="end" fill="#64748b" font-size="11" letter-spacing="1.8">COMMIT  /  ATTEST  /  COMPARE</text>
+  </g>
+</svg>

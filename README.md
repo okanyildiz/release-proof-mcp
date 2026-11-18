@@ -1,29 +1,103 @@
-# Release & Deployment Proof MCP
+<h1 align="center">
+  <a href="https://modelcontextprotocol.io">
+    <img src="assets/banner.svg" alt="Release Proof MCP - prove production bytes from reviewed commits" width="100%">
+  </a>
+</h1>
 
-Release & Deployment Proof MCP is a read-only MVP that produces an observation-window evidence receipt for one question:
+<p align="center">
+  <strong>A read-only Model Context Protocol server that produces an observation-window receipt linking a reviewed GitHub commit and approved workflow to the OCI image digest Kubernetes reported running.</strong>
+</p>
 
-> During verification, did Kubernetes report running the container image whose OCI digest was cryptographically attested by the trusted GitHub Actions identity at the expected commit, and do GitHub records satisfy the server operator's review and release-approval policy?
+<p align="center">
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-218%20passed-14b8a6?style=for-the-badge" alt="Tests: 218 passed"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.0-a78bfa?style=for-the-badge" alt="Release version 0.1.0"></a>
+</p>
 
-It exposes exactly one MCP tool over stdio: `verify_release_deployment`.
+<p align="center">
+  <a href="#what-it-does">What it does</a> |
+  <a href="#verification-chain">Verification chain</a> |
+  <a href="#quickstart">Quickstart</a> |
+  <a href="#integration">Integration</a> |
+  <a href="#security-model">Security</a> |
+  <a href="#known-limitations">Limitations</a> |
+  <a href="#faq">FAQ</a>
+</p>
 
-A `verified` result is a cryptographically linked and policy-qualified observation. It is not a statement that the artifact is secure. Both `failed` and `unknown` mean **not verified** and must fail closed if used as a deployment gate.
+> [!IMPORTANT]
+> This is an MVP evidence verifier, not an admission controller or a software-safety claim. Both `failed` and `unknown` mean **not verified** and must fail closed when used by a deployment gate.
 
-## Requirements
+## What it does
 
-- Python 3.11 or newer; the runtime package has no third-party Python dependencies.
-- `gh` 2.102.0 or newer. This is a hard floor: older versions are rejected before attestation verification because of signer-workflow prefix and case-insensitive source-ref verification vulnerabilities (GHSA-wjmr-j3rp-mh2g and GHSA-4mq3-hpgx-9cx8).
-- `crane` for registry digest resolution and manifest retrieval.
-- `kubectl` for explicit-context Deployment, ReplicaSet, and Pod reads.
-- `cosign` only when the trusted policy sets `require_cosign_signature` to true.
-- An operator-supplied trusted policy JSON file.
+`release-proof-mcp` exposes exactly one MCP tool over stdio: `verify_release_deployment`.
 
-The verifier requires both a zero exit status and a nonempty JSON array from `gh attestation verify`. Process exit status alone is not evidence. Commands use argument vectors without a shell, a 30-second per-command cap, a 120-second overall verification deadline, bounded output, process-group termination, and credential redaction.
+It checks source and review records, GitHub Actions OIDC identity, Sigstore build provenance, GHCR manifest digests, release approval, and the named container's Kubernetes `imageID`. It then returns a structured receipt with per-check evidence, explicit missing coverage, the effective server-side policy, and a policy hash.
 
-## Trusted server-side policy
+The high-value question is:
 
-Review rules, approver/reviewer IDs, self-approval controls, the signer workflow/digest, and the Cosign requirement are **not controlled by MCP arguments**. The server reads them from a file named by `RELEASE_PROOF_POLICY_FILE`. If the file contains multiple profiles, the operator must also set `RELEASE_PROOF_POLICY_PROFILE`; a single-profile file is unambiguous without it. The caller cannot select a profile or weaken its contents.
+> During this observation window, did Kubernetes report running the OCI digest attested by the trusted GitHub Actions identity at the expected commit, and did the GitHub review and release records satisfy the operator's trusted policy?
 
-Example `release-policy.json`:
+A `verified` result means every applicable check passed. It does not mean the artifact is free of vulnerabilities, the workflow was benign, or the infrastructure was uncompromised.
+
+| Verdict | Meaning | Required gate behavior |
+| --- | --- | --- |
+| `verified` | Every required check produced acceptable evidence and passed policy. | Validate the receipt subject, effective policy identity, and policy hash before relying on it. |
+| `failed` | At least one check produced conclusive negative evidence. Any failure takes precedence over unknown checks. | Reject. |
+| `unknown` | No check failed, but one or more checks lack sufficient evidence. `missing_coverage` identifies the gaps. | Reject; do not reinterpret unavailable evidence as absence or success. |
+
+## Verification chain
+
+<p align="center">
+  <img src="assets/architecture.svg" alt="Verification chain from source and review through OIDC identity, attestation, registry digest, and Kubernetes imageID to a verdict receipt" width="100%">
+</p>
+
+The diagram shows the evidence relationships. At execution time, the verifier takes an initial runtime snapshot and resolves the registry digest before verifying the attestation, then reconciles the runtime digest and takes a second snapshot.
+
+| Chain link | What it proves when verified | What it does not prove |
+| --- | --- | --- |
+| Source commit (`source.commit`) | The requested repository exposes a commit whose full SHA exactly equals `expected_commit`. | Historical branch protection, source quality, or that the commit is safe. |
+| Reviewed change (`source.review`) | The configured PR, current review decisions, exact head or merge commit, distinct allowed reviewer IDs, and non-author rule satisfy policy. | In `merged_pr` mode, direct review of the merge or squash commit; historical ruleset enforcement; reviewer infallibility. |
+| OIDC build identity and run (`attestation.verification`, `workflow.run`) | The Sigstore certificate carries the GitHub Actions issuer, exact source repository/SHA/ref, trusted signer workflow/digest, GitHub-hosted runner, and run invocation. The matching run has the expected repository, workflow, event, commit, attempt, and successful conclusion. | An uncompromised signer or runner, a benign workflow, SLSA Build L3, or cryptographically complete derivation from source. |
+| Attested artifact (`attestation.verification`) | `gh attestation verify` accepts Sigstore/DSSE evidence with SLSA v1 provenance and an in-toto subject equal to the resolved OCI digest. One fully acceptable result is sufficient. | Vulnerability absence, reproducibility, complete dependencies, or claims from workflow-controlled custom predicate fields. |
+| Registry resolution (`registry.resolution`) | `crane` resolves the tag or digest, and the returned manifest bytes independently hash to that digest. OCI image indexes, Docker manifest lists, and single image manifests are structurally validated. | Future tag stability, registry availability, or that an unknown media type is acceptable. |
+| Release approval (`release.approval`) | For certified run attempt 1, a historical approval names the exact environment and an allowed numeric approver ID, subject to the self-approval policy. | Attempt-bound approval on reruns, historical environment configuration, or a binding to a separate deployment run. |
+| Optional Cosign signature (`signature.cosign`) | When required by policy, an additional independent Cosign verification succeeds for the pinned digest and expected GitHub identity. | That signed software is secure. GitHub artifact attestation already includes signature and provenance verification. |
+| Runtime ownership and rollout (`runtime.rollout`) | UID ownership connects the named Deployment to ReplicaSets and Pods; the named container is running and ready, rollout counts agree, and nonzero replicas are requested. Labels alone do not establish ownership. | Node or kubelet integrity, or an unchanged container filesystem after startup. |
+| Runtime digest (`runtime.digest_match`) | Each running target container's registry-comparable `imageID` equals the attested digest or is an exact descriptor child of the attested OCI index. | Anything from a bare local/config ID or unrecognized `imageID`; those produce `unknown`, not a fabricated match or mismatch. |
+| Stable observation and receipt (`runtime.stable_observation`) | A second Kubernetes snapshot preserves target Pod UIDs, container IDs, image IDs, rollout revision, readiness, and related rollout evidence. The receipt records the effective policy and its SHA-256 hash. | Continuous monitoring, future restart behavior, admission enforcement, or authorization based on `verified` alone. |
+
+Security decisions use certificate and verified-signing-time evidence, not workflow-controlled predicate fields such as `resolvedDependencies`. Approval comments and raw custom predicates are not copied into receipts.
+
+## Quickstart
+
+### Requirements
+
+- Python 3.11 or newer. The runtime package has no third-party Python dependencies.
+- [`gh`](https://cli.github.com/) 2.102.0 or newer. The version floor is enforced before attestation verification to retain exact signer-workflow and case-sensitive source-ref checks.
+- [`crane`](https://github.com/google/go-containerregistry/tree/main/cmd/crane) for registry digest resolution and manifest retrieval.
+- [`kubectl`](https://kubernetes.io/docs/tasks/tools/) for explicit-context Deployment, ReplicaSet, and Pod reads.
+- [`cosign`](https://github.com/sigstore/cosign) only when the active policy sets `require_cosign_signature` to `true`.
+- Read-only credentials already configured in the server environment and existing GitHub, registry, and Kubernetes credential stores.
+
+GitHub.com and GHCR are the only supported services in this version.
+
+### 1. Install
+
+With access to the repository:
+
+```sh
+git clone https://github.com/okanyildiz/release-proof-mcp.git
+cd release-proof-mcp
+python3.11 -m venv .venv
+. .venv/bin/activate
+pip install -e .
+```
+
+### 2. Configure a trusted server-side policy
+
+Save the following as `/secure/config/release-policy.json`, replacing every example repository, commit, PR, and numeric identity with values for your dedicated environment. Protect the file with operating-system permissions. It is policy, not a credential store.
 
 ```json
 {
@@ -52,197 +126,351 @@ Example `release-policy.json`:
 }
 ```
 
-The profile schema is closed and strictly validated. `signer_digest` may be `null` only for a same-repository signer whose ref is pinned to `source_ref`; an external reusable builder always requires a full commit digest. Requests that identify a different signer workflow or digest fail with `SIGNER_POLICY_MISMATCH`.
+The profile schema is closed and strictly validated. Reviewer and approver identities are positive numeric GitHub user IDs, not mutable login names. `signer_digest` may be `null` only for a same-repository signer pinned to `source_ref`; an external reusable builder always requires a full 40-character commit digest.
 
-Every receipt includes the complete `effective_policy`, including its profile and version, plus `policy_hash`. The hash is the SHA-256 of the compact, key-sorted UTF-8 JSON representation of the effective policy. A gate consumer must validate the returned subject, effective policy identity, and policy hash against its own trusted configuration; `verified` alone is not a sufficient authorization decision.
+If the file contains multiple profiles, `RELEASE_PROOF_POLICY_PROFILE` is mandatory. A single-profile file can be selected without it. The MCP caller cannot select a profile or supply `review`, `release`, `require_cosign_signature`, or `policy_profile` arguments.
 
-## Install and run
+### 3. Start the MCP server
 
 ```sh
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -e '.[test]'
-.venv/bin/python -m pytest -q
-.venv/bin/python -m compileall -q src tests
 RELEASE_PROOF_POLICY_FILE=/secure/config/release-policy.json \
 RELEASE_PROOF_POLICY_PROFILE=production \
-.venv/bin/release-proof-mcp
+release-proof-mcp
 ```
 
-The server uses newline-delimited JSON-RPC 2.0 on stdio. It supports MCP `initialize`, `ping`, `tools/list`, and `tools/call`. Configure it as an MCP stdio server in a client; do not put credentials in tool arguments or the policy file.
+The transport is newline-delimited JSON-RPC 2.0 on stdio. The server supports MCP `initialize`, `ping`, `tools/list`, and `tools/call`, plus progress and cooperative cancellation for tool calls. Configure it as an MCP stdio server in your client; do not put credentials in tool arguments.
 
-Credentials come from the server environment and existing client configuration:
+### 4. Call `verify_release_deployment`
 
-- GitHub token: read repository contents, pull requests, Actions, and attestations; GHCR package pull access.
-- Registry: existing Docker/crane credentials for GHCR.
-- Kubernetes: `get/list` on the named Deployment and ReplicaSets/Pods in the namespace. The input must name an explicit kube context; the current default context is never silently selected.
-
-## Tool input
+The following is formatted for readability; a stdio client sends one JSON-RPC object per line.
 
 ```json
 {
-  "repo": "acme/shop",
-  "expected_commit": "0123456789abcdef0123456789abcdef01234567",
-  "artifact": "ghcr.io/acme/shop:v1.4.0",
-  "workflow": ".github/workflows/release.yml",
-  "source_ref": "refs/heads/main",
-  "signer_workflow": "acme/shop/.github/workflows/release.yml",
-  "signer_digest": "89abcdef0123456789abcdef0123456789abcdef",
-  "kube_context": "production",
-  "namespace": "production",
-  "deployment": "shop-api",
-  "container": "api",
-  "expected_run": {"id": 123456789, "attempt": 1}
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "verify_release_deployment",
+    "arguments": {
+      "repo": "acme/shop",
+      "expected_commit": "0123456789abcdef0123456789abcdef01234567",
+      "artifact": "ghcr.io/acme/shop:v1.4.0",
+      "workflow": ".github/workflows/release.yml",
+      "source_ref": "refs/heads/main",
+      "signer_workflow": "acme/shop/.github/workflows/release.yml",
+      "signer_digest": "89abcdef0123456789abcdef0123456789abcdef",
+      "kube_context": "production",
+      "namespace": "production",
+      "deployment": "shop-api",
+      "container": "api",
+      "expected_run": {
+        "id": 123456789,
+        "attempt": 1
+      }
+    }
+  }
 }
 ```
 
-Important rules:
+Input rules that prevent ambiguous evidence:
 
-- GitHub.com and GHCR are the only supported services in this MVP.
-- `expected_commit` and `signer_digest` are full 40-character lowercase commit SHAs. `source_ref` matching is exact and case-sensitive.
-- `artifact` must be `ghcr.io/...:tag` or `ghcr.io/...@sha256:...`. Verification always uses the resolved digest, never a tag. For digest-form input, `crane digest` must return that exact digest; it cannot move the subject.
-- `signer_workflow` defaults to `${repo}/${workflow}`. For reusable workflows it must identify the called reusable workflow, not the caller, and must equal the trusted profile. `signer_digest` is mandatory whenever the signer repository differs from `repo`.
-- A digest-pinned reusable signer may use its own exact branch/tag ref or the pinned SHA in its certificate; it need not equal the caller's `source_ref`. `buildSignerDigest` must still equal the trusted `signer_digest`.
-- `container` is mandatory. The verifier never falls back to `containers[0]`.
-- Reviewer and approver identities in trusted policy are immutable positive numeric GitHub user IDs, not login names.
-- `expected_run` optionally pins the run ID and attempt. Otherwise the accepted certificate's `runInvocationURI` selects the run. Only attempt 1 is accepted.
-- `review`, `release`, `require_cosign_signature`, and `policy_profile` are rejected as tool arguments. Policy comes only from server configuration.
+- `expected_commit` and `signer_digest` are full lowercase 40-character commit SHAs. `source_ref` matching is exact and case-sensitive.
+- `artifact` is `ghcr.io/...:tag` or `ghcr.io/...@sha256:...`. Verification uses the resolved digest, never the tag. Digest-form input cannot be moved to another digest by `crane`.
+- `signer_workflow` defaults to `${repo}/${workflow}`. For a reusable workflow, identify the called workflow rather than its caller, and match the trusted profile exactly.
+- `container` is mandatory; there is no fallback to `containers[0]`.
+- `kube_context` is explicit; the current default kubectl context is never silently selected.
+- `expected_run` is optional. Without it, the accepted certificate's `runInvocationURI` selects the run. Only attempt 1 is accepted.
 
-### Review modes
+### Example receipts
 
-- `exact_head`: `expected_commit == pr.head.sha`, and current approvals must cover that exact head.
-- `merged_pr`: the PR is merged, `pr.merge_commit_sha == expected_commit`, and approvals cover the final PR head. This does not prove that reviewers directly approved the merge or squash commit.
+These receipts are abridged to the fields needed to understand the verdicts. Full `release-deployment-proof/v1` receipts also include timestamps, every applicable check, `effective_policy`, `evidence`, `evidence_truncation`, `tools`, and explicit `limitations`.
 
-The verifier paginates reviews, considers each reviewer's latest decision-bearing state, ignores `COMMENTED` and `PENDING` as decision changes, rejects a latest `CHANGES_REQUESTED`, handles `DISMISSED`, and counts distinct current approvals only. It does not reconstruct historical branch rulesets. When `require_non_author` is enabled, a missing, null, malformed, or non-positive PR author ID produces `unknown / REVIEW_AUTHOR_EVIDENCE_UNAVAILABLE`, never a pass.
+**Verified: every required check passed**
 
-### Release approval model and rerun limitation
+```json
+{
+  "schema_version": "release-deployment-proof/v1",
+  "status": "verified",
+  "summary": "Kubernetes reported the OCI image attested by the approved workflow at the expected commit; the server-side review and release policy passed.",
+  "subject": {
+    "repo": "acme/shop",
+    "expected_commit": "0123456789abcdef0123456789abcdef01234567",
+    "artifact_input": "ghcr.io/acme/shop:v1.4.0",
+    "pinned_artifact": "ghcr.io/acme/shop@sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+    "kube_context": "production",
+    "namespace": "production",
+    "deployment": "shop-api",
+    "container": "api"
+  },
+  "policy_hash": "sha256:9c1ab13c9ac38c1f3dec2271e3fd23637f1cd8dc2f2f2317eb6c6f46287f4def",
+  "reasons": [],
+  "missing_coverage": []
+}
+```
 
-The supported process uses one initial run for build/attestation and protected-environment release approval. The run attempt must match the certificate, expected commit, caller workflow, event, successful conclusion, and optional `expected_run`. At least one historical approval must name the exact environment, come from an allowed numeric user ID, and satisfy `prevent_self_approval` against both run actor and triggering actor.
+**Failed: the certified run lacks the required production approval**
 
-GitHub's [workflow-run approval history API](https://docs.github.com/en/rest/actions/workflow-runs#get-the-review-history-for-a-workflow-run) exposes approvals at run level, without an attempt field. This MCP therefore does **not** claim that such an approval is bound to a rerun. A certified `runInvocationURI` with an attempt greater than 1 fails with `RUN_ATTEMPT_UNSUPPORTED`, and approval lookup is not used to authorize that rerun. `expected_run.attempt > 1` is rejected before verification. Attempt-aware validation can be enabled only after GitHub supplies and this project validates a safe binding.
+```json
+{
+  "schema_version": "release-deployment-proof/v1",
+  "status": "failed",
+  "summary": "Release deployment proof failed; no security or remediation claim is made.",
+  "reasons": [
+    {
+      "check": "release.approval",
+      "code": "RELEASE_APPROVAL_MISSING",
+      "message": "No historical approved record names the required environment for this run.",
+      "expected": "production"
+    }
+  ],
+  "missing_coverage": []
+}
+```
 
-When `prevent_self_approval` is enabled, both `actor.id` and `triggering_actor.id` must be valid positive numeric IDs. Missing or malformed evidence produces `unknown / RUN_ACTOR_EVIDENCE_UNAVAILABLE`.
+**Unknown: the runtime changed during verification**
 
-Separate build and deployment runs are out of scope because this MVP has no standard cryptographic binding from a separate deployment approval to the image digest. Today's environment settings are not treated as proof of historical enforcement.
+```json
+{
+  "schema_version": "release-deployment-proof/v1",
+  "status": "unknown",
+  "summary": "Release deployment proof is incomplete; explicit missing coverage remains.",
+  "reasons": [
+    {
+      "check": "runtime.stable_observation",
+      "code": "RUNTIME_CHANGED_DURING_VERIFICATION",
+      "message": "Target Pod identity, container identity, imageID, rollout revision, or readiness changed during verification."
+    }
+  ],
+  "missing_coverage": [
+    {
+      "check": "runtime.stable_observation",
+      "code": "RUNTIME_CHANGED_DURING_VERIFICATION"
+    }
+  ]
+}
+```
 
-## Verification chain
+Other honest degradations include `ATTESTATION_MISSING`, `PROVENANCE_MISSING`, `VERIFIER_OUTPUT_INVALID`, `ATTESTATION_SEARCH_TRUNCATED`, `TAG_MOVED`, `RUNTIME_DIGEST_MISMATCH`, `IMAGE_ID_NOT_REGISTRY_COMPARABLE`, and `SIGNATURE_MISSING`. Network failures, timeouts, trust-root retrieval problems, rate limits, and RBAC denials become unknown coverage rather than proof of absence.
 
-| Link | Evidence and policy |
-| --- | --- |
-| Repository to commit | Repo-scoped GitHub commit lookup with full SHA equality. |
-| Commit to reviewed change | PR base/head/merge records and paginated review decisions under the server-side policy. |
-| Workflow run to build identity | Sigstore certificate fields populated from GitHub OIDC, including issuer, exact signer identity/digest, source repository/SHA/ref, GitHub-hosted runner, and run invocation. Immutable repository/owner IDs are cross-checked when available. |
-| Attestation to artifact | `gh attestation verify` validates the Sigstore bundle, DSSE statement, SLSA v1 predicate, and exact in-toto subject digest. One fully acceptable result is sufficient. |
-| Registry tag to digest | `crane digest`, then `crane manifest` by digest. The returned manifest bytes are independently hashed and compared with the resolved digest. |
-| OCI index to platform image | A runtime digest passes only by direct equality or exact descriptor containment in a recognized OCI image index or Docker manifest list. An image manifest with a forged `manifests` field, unknown media type, or contradictory structure is rejected. |
-| Kubernetes to running bytes | UID-based Deployment to ReplicaSet to Pod ownership, named container status, `imageID`, running state, readiness, rollout counts, and a second stability snapshot. Labels alone never establish ownership. |
-| Run to release approval | Historical run-approval records for attempt 1 only, exact environment, numeric approver allowlist, and self-approval policy. Approval comments are not copied into receipts. |
-| Optional Cosign signature | An additional independent signature check when required by trusted policy; GitHub artifact attestation already provides signature/provenance verification. |
+A gate consumer must independently validate the returned subject, effective policy identity, and `policy_hash`. The hash covers the compact, key-sorted UTF-8 JSON representation of the effective policy; it is not a receipt signature.
 
-Security decisions use certificate and verified-timestamp evidence, not workflow-controlled predicate fields such as `resolvedDependencies` or predicate invocation IDs. Raw custom predicates are not copied into reports. `bundle_sha256` identifies the canonical JSON representation of the returned `attestation.bundle`, not a retained raw bundle file.
+## Integration
 
-### Registry and runtime edge cases
+### GitHub Actions producer contract
 
-A moved tag produces `TAG_MOVED`; a digest-input/runtime mismatch produces `RUNTIME_DIGEST_MISMATCH`. A crane-induced digest-input substitution fails registry resolution with `REGISTRY_DIGEST_MISMATCH`. A child absent from the attested OCI index fails. A bare local/config ID or unrecognized `imageID` produces `IMAGE_ID_NOT_REGISTRY_COMPARABLE` and status `unknown`, not a fabricated digest mismatch. A conclusive running-digest mismatch fails even if a rollout is also incomplete.
-
-Kubernetes is read before and after verification. Changes to target Pod UIDs, container IDs, image IDs, rollout revision, or readiness produce `RUNTIME_CHANGED_DURING_VERIFICATION` and status `unknown`. When the Deployment has a valid nonempty `spec.selector.matchLabels`, ReplicaSet and Pod list calls use that selector server-side; UID ownership checks still run locally. Invalid or absent selectors fall back to unfiltered namespace reads.
-
-## Producer contract
-
-The supported release workflow must check out and build the certified source commit, push the image to GHCR, capture the digest emitted by the push/build step, and attest that exact digest. The attestation subject name must not include a tag.
+The release workflow must check out and build the certified source commit, push to GHCR, capture the exact manifest or index digest emitted by the build/push step, and attest that digest. The attestation subject name must not contain a tag.
 
 ```yaml
+name: release
+
+on:
+  push:
+    branches: [main]
+
 permissions:
-  id-token: write
-  attestations: write
   contents: read
   packages: write
-  # Optional when supported and needed: artifact-metadata: write
+  id-token: write
+  attestations: write
 
-steps:
-  - uses: actions/checkout@v4
-    with:
-      ref: ${{ github.sha }}
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-  # Build and push with a step that emits the exact pushed manifest/index digest.
-  - id: push
-    run: |
-      ./ci/build-and-push.sh
-      # This script must set steps.push.outputs.digest to the exact pushed digest.
+      # Replace with your builder. It must push the image and write the exact
+      # pushed manifest/index digest as digest=sha256:... to $GITHUB_OUTPUT.
+      - id: push
+        run: ./ci/build-and-push.sh
 
-  - uses: actions/attest@v4
-    with:
-      subject-name: ghcr.io/ORG/IMAGE
-      subject-digest: ${{ steps.push.outputs.digest }}
-      push-to-registry: true
+      - uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/acme/shop
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 ```
 
-Use a protected reusable workflow pinned in the server-side policy by `signer_digest` for stronger builder isolation. GitHub artifact attestations alone provide SLSA v1 Build L2; Build L3 requires a suitable isolated builder design. This tool does not infer Build L3 merely because a reusable workflow was used.
+`ci/build-and-push.sh` is an illustrative operator-supplied step, not a script shipped by this repository. The supported policy model expects build/attestation and protected-environment release approval in the same initial run. Reruns and separate build/deployment runs are not accepted.
 
-References:
+For stronger builder isolation, use a protected reusable workflow pinned by full `signer_digest` in the server-side policy. A reusable workflow alone does not establish SLSA Build L3.
+
+Producer references:
 
 - [GitHub build provenance](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds)
-- [actions/attest](https://github.com/actions/attest)
-- [gh attestation verify](https://cli.github.com/manual/gh_attestation_verify)
-- [GitHub SLSA guidance](https://docs.github.com/en/enterprise-cloud@latest/actions/how-tos/secure-your-work/use-artifact-attestations/increase-security-rating)
+- [`actions/attest`](https://github.com/actions/attest)
+- [`gh attestation verify`](https://cli.github.com/manual/gh_attestation_verify)
 
-## Output and failure semantics
+### GHCR
 
-Reports use schema `release-deployment-proof/v1`. Each check is independently marked `verified`, `failed`, or `unknown`, with structured reasons and evidence references. Top-level `missing_coverage` lists every unknown check. Aggregation is strict:
+Use an existing Docker/crane credential with package pull access and a GitHub token that can read repository contents, PRs, Actions, and attestations. No production mutation permission is needed.
 
-1. Any failed check makes the report `failed`.
-2. Otherwise any unknown check makes it `unknown`.
-3. Only all required checks verified makes the report `verified`.
+Tags are accepted as input and resolved during verification. Digest input is also accepted, but `crane digest` must return the same digest. The verifier then retrieves the manifest by digest and hashes the exact returned bytes. For a multi-platform OCI index, the runtime may report either the index digest or an exact child descriptor digest; a child absent from the attested index fails.
 
-Examples of honest degradation:
+### Kubernetes deployment
 
-- Authoritative absence of attestation: `failed / ATTESTATION_MISSING`.
-- Only SBOM/custom evidence: `failed / PROVENANCE_MISSING`.
-- Empty or malformed successful verifier JSON: `unknown / VERIFIER_OUTPUT_INVALID`.
-- Search reached 100 results without an acceptable result: `unknown / ATTESTATION_SEARCH_TRUNCATED`.
-- Wrong identity, source SHA/ref, signer digest, trusted signer selection, or self-hosted runner: failed policy reasons.
-- Opaque verifier rejection: `failed / ATTESTATION_VERIFICATION_FAILED`.
-- Timeout, DNS, rate limit, trust-root fetch failure, or RBAC denial: unknown coverage, not absence.
-- Overall deadline or cancellation: `unknown / VERIFICATION_DEADLINE_EXCEEDED` or `VERIFICATION_CANCELLED`.
-- Expired short-lived certificate with valid verified signing-time evidence remains valid; later expiration alone is not a failure.
-- Required Cosign signature absent: `failed / SIGNATURE_MISSING`.
+Deploy the exact digest produced by the release workflow. This example matches the tool input above; replace its documentation-only digest with your image's actual digest before applying it.
 
-The receipt contains evidence links where available, selected allowlisted certificate/attestation fields, sanitized runtime observations, tool versions, effective policy/hash, and explicit limitations. Approval comments are always omitted. Environment credentials, common token forms, Bearer values, authorization-header values, and known GitHub token formats are redacted from retained diagnostics and every tool's version output. Receipt evidence arrays retain at most 100 entries and disclose omitted counts in `evidence_truncation`; a serialized receipt over 512 KiB is rejected with an RPC error rather than returned as an evidence claim. Review reports before sharing because names, commit IDs, and user IDs can still be sensitive.
-
-For operational control, requests carrying `_meta.progressToken` receive `notifications/progress` stage updates. `notifications/cancelled` cooperatively terminates the active process group and marks remaining coverage unknown. Stdio tool calls run separately so cancellation and ping requests can be processed during verification. The overall deadline and all cleanup waits are bounded.
-
-## What this does not prove
-
-Even a verified receipt does not prove:
-
-- absence of vulnerabilities, malware, or reviewer mistakes;
-- reproducible builds, complete dependency capture, or that the artifact is mathematically derived from source;
-- that the workflow was benign or correctly implemented;
-- historical branch-protection or environment-rule enforcement;
-- attempt-bound approval on a workflow rerun;
-- uncompromised signers, runners, GitHub, Sigstore, registry, Kubernetes API, kubelet, or nodes;
-- integrity of a mutable container filesystem after startup;
-- future tag stability, registry availability, or that future restarts will pull the same bytes;
-- coverage of a separate deployment run or unrelated tags/registries.
-
-This is an observation-window receipt, complementary to admission controllers. Continue to use digest-pinned deployment, admission enforcement, isolated builders, vulnerability scanning, and operational monitoring.
-
-## Tests and live verification
-
-The deterministic suite mocks external network services through one argv-based fake adapter and also launches real local Python subprocesses for timeout, process-tree cleanup, output-limit, cancellation, redaction, and `shell=False` coverage. It covers pass/fail/unknown behavior across every chain link, exact identity and trusted-policy matching, OCI structure validation, output bounds, schema stability, and injection rejection. No test invokes production mutation commands.
-
-```sh
-.venv/bin/python -m pytest -q
-.venv/bin/python -m compileall -q src tests
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shop-api
+  namespace: production
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: shop
+  template:
+    metadata:
+      labels:
+        app: shop
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/acme/shop@sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7
 ```
 
-An optional live smoke test is skipped by default. Run it only against a dedicated repository, GHCR image, and test cluster, with the operator policy configured:
+Grant the verifier only `get`/`list` access to the named Deployment and to ReplicaSets and Pods in that namespace. The verifier requires an explicit context and the container name. It reads Kubernetes before and after verification and returns `RUNTIME_CHANGED_DURING_VERIFICATION` if relevant identities or readiness change.
+
+Digest-pinned deployment remains important: this receipt does not constrain a later restart or future tag pull.
+
+## Security model
+
+### Read-only by construction
+
+The tool has no deploy, mutate, approve, remediate, or admission operation. External commands are evidence reads and verifiers: GitHub API/attestation commands, `crane digest`/`manifest`, Kubernetes version/get commands, and optional `cosign verify`.
+
+Commands use argument vectors with `shell=False`, a 30-second default per-command cap, a 120-second overall deadline, bounded output, process-group termination, and cooperative cancellation. Serialized receipts over 512 KiB are rejected instead of returned as evidence claims.
+
+### Credentials and privacy
+
+- Never place tokens, kubeconfig data, registry credentials, or other secrets in MCP arguments or the policy file.
+- Use least-privilege existing credentials in the server environment and tool-specific credential stores.
+- Common token forms, Bearer values, authorization values, and configured environment secrets are redacted from retained diagnostics and tool-version output.
+- Approval comments, authorization data, kubeconfig contents, registry credentials, and custom predicates are not retained in receipts.
+- Resource names, commit IDs, numeric user IDs, evidence links, and effective policy can still be sensitive. Review receipts before sharing them.
+
+### Policy is outside the caller's trust boundary
+
+The server operator controls review rules, reviewer/approver numeric IDs, self-approval rules, signer workflow/digest, release environment, and the Cosign requirement. The active profile is selected by server configuration. Requests that name a different signer fail with `SIGNER_POLICY_MISMATCH` before attestation verification.
+
+### Trust boundaries
+
+The verifier trusts GitHub, Sigstore, GHCR, the Kubernetes API, and reported kubelet/runtime evidence to provide accurate source records, then independently checks the documented relationships. It does not defend against a compromised trust path, signer, runner, registry, Kubernetes control plane, kubelet, or node.
+
+See [SECURITY.md](SECURITY.md) for the reporting process and operational recommendations.
+
+## Tests and verification
+
+At commit `8b996c1`, the local deterministic suite reports **218 passed, 1 skipped**. The skipped test is the opt-in live smoke test; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
-RELEASE_PROOF_LIVE_SMOKE=1 \
-RELEASE_PROOF_POLICY_FILE=/secure/config/release-policy.json \
-RELEASE_PROOF_POLICY_PROFILE=production \
-RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop", ...}' \
-.venv/bin/python -m pytest -q -m live tests/test_live_smoke.py
+python -m pip install -e '.[test]'
+python -m pytest -q
+python -m compileall -q src tests
 ```
 
-The live path remains environment-dependent and is not claimed as verified by the mocked/local CI result. Live compatibility still needs to cover real GitHub approval/rerun behavior, `gh` JSON contracts, GHCR manifest/index races, Kubernetes distributions and container runtimes, Cosign trust, and actual MCP clients.
+What is exercised locally:
+
+- An argv-based fake adapter returns deterministic GitHub, attestation, GHCR, Kubernetes, and Cosign responses. Unexpected external commands fail the test.
+- Real local Python subprocesses exercise timeout, process-tree cleanup, bounded output, cancellation, redaction, and `shell=False` behavior.
+- Local MCP tests exercise JSON-RPC framing, the single-tool schema, structured receipts, progress, cancellation, and size limits.
+- Cases cover pass/fail/unknown aggregation, policy matching, review state, release approvals, OCI structure, runtime ownership, digest reconciliation, injection rejection, and receipt bounds.
+- No test invokes a production mutation command.
+
+The external service integrations are mocked in the deterministic suite. A passing local suite is not evidence that a live GitHub/GHCR/Kubernetes/Cosign combination has been validated.
+
+### Optional live smoke test
+
+Run this only against a dedicated repository, GHCR image, and test cluster after replacing every example value. Configure credentials outside the command and policy file. The test calls the real verifier and asserts a `verified` result.
+
+```sh
+export RELEASE_PROOF_LIVE_SMOKE=1
+export RELEASE_PROOF_POLICY_FILE=/secure/config/release-policy.json
+export RELEASE_PROOF_POLICY_PROFILE=production
+export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","signer_digest":"89abcdef0123456789abcdef0123456789abcdef","kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
+python -m pytest -q -m live tests/test_live_smoke.py
+```
+
+No live smoke result is claimed here. Live compatibility still needs evidence for real GitHub approval behavior, `gh` JSON contracts, GHCR manifest/index races, Kubernetes distributions and runtimes, Cosign trust configuration, and actual MCP clients.
+
+## Known limitations
+
+- **Live integration remains unverified.** The 218 passing tests are deterministic/local evidence, not a live provider compatibility matrix.
+- **Windows process-tree cleanup needs platform validation.** The runner has a separate Windows `CREATE_NEW_PROCESS_GROUP` and `taskkill /T /F` path. The local process-tree tests exercise real subprocesses, but this macOS run does not establish Windows behavior.
+- **Approvals are not attempt-bound.** GitHub's approval history is run-level. Only certified run attempt 1 is supported; rerun attempts fail with `RUN_ATTEMPT_UNSUPPORTED` rather than inheriting an approval.
+- **No admission control or continuous enforcement.** The receipt covers an observation window. It does not block a deployment, prevent later changes, or guarantee what a future Pod restart pulls.
+- **Only the documented provider and runtime path is supported.** GitHub.com, GHCR, a Kubernetes Deployment, and the named container are in scope. Other registries, source providers, workload types, and separate deployment workflows are not silently generalized.
+- **Review evidence has a precise boundary.** `merged_pr` does not prove direct approval of the merge commit, and current records do not reconstruct historical branch or environment rules.
+- **A signature is not a safety judgment.** There is no vulnerability, malware, reproducible-build, complete-dependency, node-integrity, or post-start filesystem guarantee.
+
+Use digest-pinned deployments, isolated builders, admission enforcement, vulnerability scanning, and runtime monitoring alongside this verifier.
+
+## Roadmap
+
+These are investigation and implementation goals, not dated promises:
+
+- [ ] Build a documented live integration matrix across real GitHub approvals, `gh`, GHCR, Kubernetes distributions/runtimes, Cosign, and MCP clients.
+- [ ] Add providers only when equivalent source identity, signed provenance, immutable digest, and runtime evidence can be preserved.
+- [ ] Add signed, canonical receipts and verification tooling; current receipts contain a policy hash but are not signed.
+- [ ] Document reference gate-consumer patterns without presenting the observation receipt as admission control.
+
+## FAQ
+
+### Does `verified` mean the release is secure?
+
+No. It means the documented evidence links and server-side policy passed during the observation window. It says nothing about vulnerability absence, reviewer correctness, workflow safety, or compromised infrastructure.
+
+### What is the difference between `failed` and `unknown`?
+
+`failed` records conclusive negative evidence, such as a digest mismatch or missing required approval. `unknown` means evidence is incomplete or unavailable, such as a timeout or non-comparable `imageID`. Neither is verified; a gate must reject both.
+
+### Can the MCP caller choose a policy or approver?
+
+No. The tool schema rejects policy arguments, including `policy_profile`, `review`, and `release`. The operator selects the profile through server configuration, and reviewer/approver identities in policy are immutable numeric GitHub user IDs.
+
+### Why verify Kubernetes `imageID` instead of the Deployment's `image` string?
+
+The spec may contain a mutable tag. A registry-comparable `imageID` reports the digest the runtime associated with the running container, allowing an exact comparison with the attested OCI object. It still does not prove node integrity or post-start filesystem integrity.
+
+### Are multi-platform images supported?
+
+Yes, within the documented OCI path. The runtime digest must equal the attested index digest or exactly match a descriptor in a recognized OCI image index or Docker manifest list. Unknown media types and contradictory manifest structures are rejected.
+
+### Can I verify a rerun or a separate deployment workflow?
+
+Not in this version. Only attempt 1 is accepted because run-level approval history cannot be safely bound to a rerun. A separate deployment run lacks a standard cryptographic binding to the image digest in this implementation.
+
+### Is the receipt signed?
+
+No. `policy_hash` identifies the effective policy; it does not sign the receipt. Signed receipts are a roadmap item. Protect the receipt transport and independently validate its subject and policy identity.
+
+### Can this replace an admission controller?
+
+No. It observes and reports evidence but does not mutate or block workloads. Keep admission-time signature/policy enforcement and digest-pinned deployment as separate controls.
+
+## Contributing and support
+
+Contributions are welcome through a focused, tested pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the PR process, and the security-sensitive review checklist.
+
+- Use [GitHub Issues](https://github.com/okanyildiz/release-proof-mcp/issues) for bugs, reproducible evidence mismatches, documentation corrections, and live-integration results.
+- GitHub Discussions is not currently enabled for this private repository. Use an issue for design questions until a discussions area is available.
+- Do not disclose a suspected vulnerability in a public issue. Follow [SECURITY.md](SECURITY.md).
+- Never attach live tokens, kubeconfig contents, registry credentials, approval comments, or sensitive production receipts.
+
+## Author
+
+**Okan YILDIZ**
+
+- [GitHub profile](https://github.com/okanyildiz)
+- [release-proof-mcp repository](https://github.com/okanyildiz/release-proof-mcp)
+- [Buy Me a Coffee](https://buymeacoffee.com/okanyildizr)
+
+## License
+
+Released under the [MIT License](LICENSE).
