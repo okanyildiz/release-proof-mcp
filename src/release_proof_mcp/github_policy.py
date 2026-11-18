@@ -4,7 +4,6 @@ from typing import Any
 
 from .report import Reason
 from .request import ReleasePolicy, ReviewPolicy
-from .runner import redact
 
 
 class PolicyViolation(ValueError):
@@ -90,6 +89,18 @@ def validate_review(
             Reason("REVIEW_POLICY_FAILED", "The pull request has no final head SHA."),
             {"pull_request": pr_evidence},
         )
+    author_id = None
+    if policy.require_non_author:
+        author = pr.get("user") if isinstance(pr.get("user"), dict) else {}
+        author_id = author.get("id")
+        if not _positive_id(author_id):
+            raise PolicyViolation(
+                Reason(
+                    "REVIEW_AUTHOR_EVIDENCE_UNAVAILABLE",
+                    "Non-author review policy requires a valid positive numeric pull request author ID.",
+                ),
+                {"pull_request": pr_evidence},
+            )
 
     reviews = _flatten_review_pages(review_pages)
     latest: dict[int, dict[str, Any]] = {}
@@ -120,8 +131,6 @@ def validate_review(
             {"pull_request": pr_evidence, "reviews": review_evidence},
         )
 
-    author = pr.get("user") if isinstance(pr.get("user"), dict) else {}
-    author_id = author.get("id")
     approvals: list[dict[str, Any]] = []
     for reviewer_id, review in latest.items():
         if review.get("state") != "APPROVED" or review.get("commit_id") != head_sha:
@@ -192,15 +201,28 @@ def validate_release_approval(
     run: Any,
     policy: ReleasePolicy,
 ) -> list[dict[str, Any]]:
-    if not isinstance(approvals, list):
-        raise PolicyViolation(Reason("RELEASE_APPROVAL_MISSING", "Release approval evidence is malformed."))
     actor_ids: set[int] = set()
-    if isinstance(run, dict):
+    if policy.prevent_self_approval:
+        if not isinstance(run, dict):
+            raise PolicyViolation(
+                Reason(
+                    "RUN_ACTOR_EVIDENCE_UNAVAILABLE",
+                    "Self-approval policy requires valid run actor and triggering actor records.",
+                )
+            )
         for key in ("actor", "triggering_actor"):
             actor = run.get(key) if isinstance(run.get(key), dict) else {}
             actor_id = actor.get("id")
-            if isinstance(actor_id, int) and not isinstance(actor_id, bool):
-                actor_ids.add(actor_id)
+            if not _positive_id(actor_id):
+                raise PolicyViolation(
+                    Reason(
+                        "RUN_ACTOR_EVIDENCE_UNAVAILABLE",
+                        f"Self-approval policy requires a valid positive numeric {key}.id.",
+                    )
+                )
+            actor_ids.add(actor_id)
+    if not isinstance(approvals, list):
+        raise PolicyViolation(Reason("RELEASE_APPROVAL_MISSING", "Release approval evidence is malformed."))
 
     environment_matches: list[tuple[dict[str, Any], int]] = []
     for approval in approvals:
@@ -214,7 +236,7 @@ def validate_release_approval(
             continue
         user = approval.get("user") if isinstance(approval.get("user"), dict) else {}
         user_id = user.get("id")
-        if isinstance(user_id, int) and not isinstance(user_id, bool):
+        if _positive_id(user_id):
             environment_matches.append((approval, user_id))
     if not environment_matches:
         raise PolicyViolation(
@@ -231,7 +253,7 @@ def validate_release_approval(
             continue
         if policy.prevent_self_approval and user_id in actor_ids:
             continue
-        allowed.append(_approval_evidence(approval, policy.environment, user_id))
+        allowed.append(_approval_evidence(policy.environment, user_id))
     if not allowed:
         raise PolicyViolation(
             Reason(
@@ -276,11 +298,13 @@ def _review_evidence(review: dict[str, Any], repo: str, number: int) -> dict[str
     }
 
 
-def _approval_evidence(approval: dict[str, Any], environment: str, user_id: int) -> dict[str, Any]:
-    comment = approval.get("comment")
+def _approval_evidence(environment: str, user_id: int) -> dict[str, Any]:
     return {
         "environment": environment,
         "approver_id": user_id,
         "state": "approved",
-        "comment": redact(comment[:500], None) if isinstance(comment, str) else None,
     }
+
+
+def _positive_id(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0

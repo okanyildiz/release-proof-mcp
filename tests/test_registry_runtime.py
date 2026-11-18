@@ -296,7 +296,7 @@ def test_kubectl_timeout_is_unknown(harness: Harness) -> None:
 
 
 def test_required_cosign_signature_missing_fails(harness: Harness) -> None:
-    harness.request["require_cosign_signature"] = True
+    harness.policy["require_cosign_signature"] = True
     harness.runner.route(["cosign", "version"], "v2.5.0")
     harness.runner.route(cosign_argv(harness), returncode=1, stderr="no signatures found")
 
@@ -326,3 +326,71 @@ def test_runtime_evidence_order_is_deterministic(harness: Harness) -> None:
 
     assert report["status"] == "verified"
     assert [item["uid"] for item in report["evidence"]["pods"]] == ["a", "z"]
+
+
+def test_digest_pinned_input_cannot_be_moved_by_crane(harness: Harness) -> None:
+    pinned = f"ghcr.io/acme/shop@{DIGEST}"
+    harness.request["artifact"] = pinned
+    harness.runner.route(["crane", "digest", pinned], INDEX_DIGEST)
+
+    report = harness.verify()
+
+    resolution = check(report, "registry.resolution")
+    assert resolution["status"] == "failed"
+    assert resolution["reason"]["code"] == "REGISTRY_DIGEST_MISMATCH"
+    assert resolution["reason"]["expected"] == DIGEST
+    assert resolution["reason"]["actual"] == INDEX_DIGEST
+    assert report["subject"]["pinned_artifact"] is None
+    assert not any(call[:2] == ("crane", "manifest") for call in harness.runner.calls)
+
+
+def test_image_manifest_with_forged_manifests_field_is_not_an_index(harness: Harness) -> None:
+    import hashlib
+    from conftest import MANIFEST
+
+    forged = json.loads(MANIFEST)
+    forged["manifests"] = [{"digest": CHILD_DIGEST, "size": 123}]
+    forged_bytes = json.dumps(forged, separators=(",", ":")).encode()
+    forged_digest = f"sha256:{hashlib.sha256(forged_bytes).hexdigest()}"
+    harness.runner.route(["crane", "digest", ARTIFACT], forged_digest)
+    harness.runner.route(["crane", "manifest", f"ghcr.io/acme/shop@{forged_digest}"], forged_bytes)
+    harness.set_attestation([attestation_result(forged_digest)], digest=forged_digest)
+    harness.set_runtime(pods={"items": [pod_object(f"ghcr.io/acme/shop@{CHILD_DIGEST}")]})
+
+    report = harness.verify()
+
+    resolution = check(report, "registry.resolution")
+    assert resolution["status"] == "unknown"
+    assert resolution["reason"]["code"] == "REGISTRY_RESPONSE_INVALID"
+    assert check(report, "attestation.verification")["reason"]["code"] == "ATTESTATION_INPUT_UNAVAILABLE"
+    assert report["status"] != "verified"
+    assert all(pod.get("digest_relation") != "index_child" for pod in report["evidence"]["pods"])
+
+
+def test_index_with_image_manifest_structure_is_rejected(harness: Harness) -> None:
+    import hashlib
+
+    contradictory = json.dumps({
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [{"digest": CHILD_DIGEST}],
+        "config": {},
+        "layers": [],
+    }, separators=(",", ":")).encode()
+    digest = f"sha256:{hashlib.sha256(contradictory).hexdigest()}"
+    harness.runner.route(["crane", "digest", ARTIFACT], digest)
+    harness.runner.route(["crane", "manifest", f"ghcr.io/acme/shop@{digest}"], contradictory)
+
+    report = harness.verify()
+
+    assert check(report, "registry.resolution")["status"] == "unknown"
+    assert check(report, "registry.resolution")["reason"]["code"] == "REGISTRY_RESPONSE_INVALID"
+    assert report["status"] != "verified"
+
+
+def test_crane_digest_accepts_one_trailing_newline(harness: Harness) -> None:
+    harness.runner.route(["crane", "digest", ARTIFACT], DIGEST + "\n")
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"

@@ -89,7 +89,7 @@ def test_pending_review_does_not_erase_or_add_approval(harness: Harness) -> None
 
 
 def test_insufficient_distinct_approval_count_fails(harness: Harness) -> None:
-    harness.request["review"]["min_approvals"] = 2
+    harness.policy["review"]["min_approvals"] = 2
     harness.set_reviews([[approval()]])
 
     report = harness.verify()
@@ -109,7 +109,7 @@ def test_reviewer_outside_numeric_id_allowlist_fails(harness: Harness) -> None:
 
 
 def test_author_self_review_fails_non_author_policy(harness: Harness) -> None:
-    harness.request["review"]["allowed_reviewer_ids"] = [9001]
+    harness.policy["review"]["allowed_reviewer_ids"] = [9001]
     harness.set_reviews([[approval(reviewer_id=9001)]])
 
     report = harness.verify()
@@ -118,8 +118,8 @@ def test_author_self_review_fails_non_author_policy(harness: Harness) -> None:
 
 
 def test_author_review_counts_when_non_author_policy_disabled(harness: Harness) -> None:
-    harness.request["review"]["allowed_reviewer_ids"] = [9001]
-    harness.request["review"]["require_non_author"] = False
+    harness.policy["review"]["allowed_reviewer_ids"] = [9001]
+    harness.policy["review"]["require_non_author"] = False
     harness.set_reviews([[approval(reviewer_id=9001)]])
 
     report = harness.verify()
@@ -128,7 +128,7 @@ def test_author_review_counts_when_non_author_policy_disabled(harness: Harness) 
 
 
 def test_duplicate_reviewer_approvals_count_once(harness: Harness) -> None:
-    harness.request["review"]["min_approvals"] = 2
+    harness.policy["review"]["min_approvals"] = 2
     harness.set_reviews([[approval(review_id=1), approval(review_id=2)]])
 
     report = harness.verify()
@@ -137,7 +137,7 @@ def test_duplicate_reviewer_approvals_count_once(harness: Harness) -> None:
 
 
 def test_all_review_pages_are_counted_deterministically(harness: Harness) -> None:
-    harness.request["review"]["min_approvals"] = 2
+    harness.policy["review"]["min_approvals"] = 2
     harness.set_reviews([[approval(1002, 2)], [approval(1001, 1)]])
 
     report = harness.verify()
@@ -285,7 +285,7 @@ def test_deployment_self_approval_is_rejected(harness: Harness, actor: str) -> N
     run[actor]["id"] = 3001
     harness.set_run(run)
     harness.set_approvals(records)
-    harness.request["release"]["required_approver_ids"] = [3001]
+    harness.policy["release"]["required_approver_ids"] = [3001]
 
     report = harness.verify()
 
@@ -297,8 +297,8 @@ def test_self_approval_can_only_pass_when_explicitly_allowed(harness: Harness) -
     records = approvals_object()
     records[0]["user"]["id"] = 3001
     harness.set_approvals(records)
-    harness.request["release"]["required_approver_ids"] = [3001]
-    harness.request["release"]["prevent_self_approval"] = False
+    harness.policy["release"]["required_approver_ids"] = [3001]
+    harness.policy["release"]["prevent_self_approval"] = False
 
     report = harness.verify()
 
@@ -338,3 +338,100 @@ def test_approval_api_access_denied_is_unknown(harness: Harness) -> None:
 
     assert check(report, "release.approval")["status"] == "unknown"
     assert check(report, "release.approval")["reason"]["code"] == "GITHUB_ACCESS_DENIED"
+
+
+@pytest.mark.parametrize("actor_name", ["actor", "triggering_actor"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing_actor", "null_actor", "missing_id", "null_id", "string_id", "zero_id", "bool_id"],
+)
+def test_self_approval_requires_complete_positive_actor_ids(
+    harness: Harness, actor_name: str, mutation: str
+) -> None:
+    run = run_object()
+    approver_id = run[actor_name]["id"]
+    if mutation == "missing_actor":
+        run.pop(actor_name)
+    elif mutation == "null_actor":
+        run[actor_name] = None
+    elif mutation == "missing_id":
+        run[actor_name].pop("id")
+    elif mutation == "null_id":
+        run[actor_name]["id"] = None
+    elif mutation == "string_id":
+        run[actor_name]["id"] = str(approver_id)
+    elif mutation == "zero_id":
+        run[actor_name]["id"] = 0
+    else:
+        run[actor_name]["id"] = True
+    records = approvals_object()
+    records[0]["user"]["id"] = approver_id
+    harness.policy["release"]["required_approver_ids"] = [approver_id]
+    harness.set_run(run)
+    harness.set_approvals(records)
+
+    report = harness.verify()
+
+    approval_check = check(report, "release.approval")
+    assert approval_check["status"] == "unknown"
+    assert approval_check["reason"]["code"] == "RUN_ACTOR_EVIDENCE_UNAVAILABLE"
+    assert report["status"] != "verified"
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing_user", "null_user", "missing_id", "null_id", "string_id", "zero_id"]
+)
+def test_non_author_policy_requires_valid_pr_author_id(harness: Harness, mutation: str) -> None:
+    pr = pr_object()
+    if mutation == "missing_user":
+        pr.pop("user")
+    elif mutation == "null_user":
+        pr["user"] = None
+    elif mutation == "missing_id":
+        pr["user"].pop("id")
+    elif mutation == "null_id":
+        pr["user"]["id"] = None
+    elif mutation == "string_id":
+        pr["user"]["id"] = "9001"
+    else:
+        pr["user"]["id"] = 0
+    harness.policy["review"]["allowed_reviewer_ids"] = [9001]
+    harness.set_pr(pr)
+    harness.set_reviews([[approval(reviewer_id=9001)]])
+
+    report = harness.verify()
+
+    review_check = check(report, "source.review")
+    assert review_check["status"] == "unknown"
+    assert review_check["reason"]["code"] == "REVIEW_AUTHOR_EVIDENCE_UNAVAILABLE"
+    assert report["status"] != "verified"
+
+
+def test_missing_author_is_allowed_when_non_author_policy_is_disabled(harness: Harness) -> None:
+    pr = pr_object()
+    pr.pop("user")
+    harness.policy["review"]["require_non_author"] = False
+    harness.set_pr(pr)
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"
+
+
+def test_rerun_attempt_is_rejected_because_approvals_are_run_level(harness: Harness) -> None:
+    from conftest import attestation_result
+
+    harness.request.pop("expected_run")
+    harness.set_attestation([
+        attestation_result(
+            runInvocationURI="https://github.com/acme/shop/actions/runs/123456789/attempts/2"
+        )
+    ])
+
+    report = harness.verify()
+
+    assert check(report, "attestation.verification")["status"] == "verified"
+    assert check(report, "workflow.run")["reason"]["code"] == "RUN_ATTEMPT_UNSUPPORTED"
+    assert check(report, "release.approval")["reason"]["code"] == "RUN_ATTEMPT_UNSUPPORTED"
+    assert report["status"] == "failed"
+    assert not any("attempts/2" in "/".join(call) for call in harness.runner.calls if call[:2] == ("gh", "api"))

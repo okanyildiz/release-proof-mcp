@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
+import threading
 
-from conftest import Harness, approvals_object, check, pod_object
+from conftest import Harness, approvals_object, base_policy, check, pod_object
 from release_proof_mcp.report import CHECK_ORDER
 from release_proof_mcp.runner import _BoundedReader, redact
 
@@ -40,10 +42,13 @@ def test_stable_report_schema_and_check_order(harness: Harness) -> None:
         "started_at",
         "completed_at",
         "subject",
+        "effective_policy",
+        "policy_hash",
         "checks",
         "reasons",
         "missing_coverage",
         "evidence",
+        "evidence_truncation",
         "tools",
         "limitations",
     ]
@@ -52,6 +57,9 @@ def test_stable_report_schema_and_check_order(harness: Harness) -> None:
     ]
     for item in report["checks"]:
         assert list(item) == ["name", "status", "reason", "evidence"]
+    canonical_policy = json.dumps(report["effective_policy"], sort_keys=True, separators=(",", ":")).encode()
+    assert report["policy_hash"] == f"sha256:{hashlib.sha256(canonical_policy).hexdigest()}"
+    assert report["effective_policy"]["review"] == base_policy()["review"]
     json.dumps(report, allow_nan=False)
 
 
@@ -88,25 +96,88 @@ def test_signed_is_not_described_as_secure(harness: Harness) -> None:
     assert "vulnerability-free" not in report["summary"].lower()
 
 
-def test_approval_comments_are_bounded_and_redacted(harness: Harness) -> None:
+def test_approval_comments_are_omitted_even_with_unlabeled_credentials(harness: Harness) -> None:
+    github_token = "ghp_" + "a" * 36
     records = approvals_object()
-    records[0]["comment"] = "token=supersecret " + "x" * 1000
+    records[0]["comment"] = f"token=supersecret {github_token} GH_TOKEN=env-secret " + "x" * 1000
     harness.set_approvals(records)
 
     report = harness.verify()
+    encoded = json.dumps(report)
 
-    comment = report["evidence"]["release_approvals"][0]["comment"]
-    assert len(comment) <= 500
-    assert "supersecret" not in comment
-    assert "[REDACTED]" in comment
+    approval = report["evidence"]["release_approvals"][0]
+    assert "comment" not in approval
+    for secret in ("supersecret", github_token, "env-secret"):
+        assert secret not in encoded
 
 
-def test_credential_redaction_covers_environment_and_headers() -> None:
-    text = "GH_TOKEN=abc123 Bearer my-secret Authorization: top-secret password=hunter2"
+def test_receipt_evidence_arrays_are_capped(harness: Harness) -> None:
+    harness.set_approvals(approvals_object() * 101)
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"
+    assert len(report["evidence"]["release_approvals"]) == 100
+    assert report["evidence_truncation"]["release_approvals"] == {"retained": 100, "omitted": 1}
+
+
+def test_overall_deadline_fails_closed_before_more_commands(harness: Harness) -> None:
+    now = [0.0]
+
+    def monotonic() -> float:
+        value = now[0]
+        now[0] += 1.0
+        return value
+
+    report = harness.verify(deadline_seconds=0.5, monotonic=monotonic)
+
+    assert report["status"] == "unknown"
+    assert check(report, "source.commit")["reason"]["code"] == "VERIFICATION_DEADLINE_EXCEEDED"
+    assert harness.runner.calls == []
+
+
+def test_cancellation_fails_closed_before_more_commands(harness: Harness) -> None:
+    cancelled = threading.Event()
+    cancelled.set()
+
+    report = harness.verify(cancel_event=cancelled)
+
+    assert report["status"] == "unknown"
+    assert check(report, "source.commit")["reason"]["code"] == "VERIFICATION_CANCELLED"
+    assert harness.runner.calls == []
+
+
+def test_progress_is_reported_for_verification_stages(harness: Harness) -> None:
+    stages: list[str] = []
+
+    report = harness.verify(progress=stages.append)
+
+    assert report["status"] == "verified"
+    assert stages == [
+        "tools.discovery",
+        "source.commit",
+        "source.review",
+        "runtime.rollout",
+        "registry.resolution",
+        "attestation.verification",
+        "workflow.run",
+        "release.approval",
+        "runtime.digest_match",
+        "runtime.stable_observation",
+    ]
+
+
+def test_credential_redaction_covers_environment_headers_and_github_tokens() -> None:
+    github_token = "ghp_" + "a" * 36
+    fine_grained = "github_pat_" + "b" * 30
+    text = (
+        f"GH_TOKEN=abc123 Bearer my-secret Authorization: top-secret password=hunter2 "
+        f"{github_token} {fine_grained}"
+    )
 
     result = redact(text, {"GH_TOKEN": "abc123"})
 
-    for secret in ("abc123", "my-secret", "top-secret", "hunter2"):
+    for secret in ("abc123", "my-secret", "top-secret", "hunter2", github_token, fine_grained):
         assert secret not in result
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
 
@@ -14,19 +16,40 @@ from .github_policy import (
     validate_review,
     validate_workflow_run,
 )
+from .policy import TrustedPolicy
 from .report import Reason, ReportBuilder
 from .request import ISSUER, PREDICATE_TYPE, SHA256_RE, VerificationRequest
 from .runner import (
+    CommandCancelled,
     CommandResult,
     CommandTimeout,
     OutputLimitExceeded,
     ProcessRunner,
     RunnerError,
     ToolUnavailable,
+    redact,
 )
-from .runtime import RuntimeEvidenceError, RuntimeSnapshot, build_snapshot, reconcile_runtime_digests
+from .runtime import (
+    RuntimeEvidenceError,
+    RuntimeSnapshot,
+    build_snapshot,
+    deployment_label_selector,
+    reconcile_runtime_digests,
+)
 
 GH_MINIMUM = (2, 102, 0)
+INDEX_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
+MANIFEST_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.manifest.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    }
+)
 
 
 class EvidenceError(RuntimeError):
@@ -41,31 +64,66 @@ class ReleaseVerifier:
         runner: ProcessRunner | None = None,
         *,
         clock: Callable[[], datetime] | None = None,
+        deadline_seconds: float = 120.0,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
+        if deadline_seconds <= 0:
+            raise ValueError("The overall verification deadline must be positive.")
         self.runner = runner or ProcessRunner()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.deadline_seconds = deadline_seconds
+        self.monotonic = monotonic
+        self._deadline: float | None = None
+        self._cancel_event: threading.Event | None = None
+        self._progress: Callable[[str], None] | None = None
 
-    def verify(self, request: VerificationRequest) -> dict[str, Any]:
+    def verify(
+        self,
+        request: VerificationRequest,
+        policy: TrustedPolicy,
+        *,
+        cancel_event: threading.Event | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         started_at = self._now()
-        report = ReportBuilder(request, started_at)
-        gh_version_reason = self._discover_tools(request, report)
-
-        self._verify_source(request, report)
-        first_snapshot = self._first_runtime_snapshot(request, report)
-        registry = self._resolve_registry(request, report)
-        attestation = self._verify_attestation(request, report, registry, gh_version_reason)
-        self._verify_run_and_release(request, report, attestation)
-        if request.require_cosign_signature:
-            self._verify_cosign(request, report, registry)
-        self._reconcile_runtime(request, report, first_snapshot, registry)
-        self._verify_stable_observation(request, report, first_snapshot)
-        return report.finalize(self._now())
-
-    def _discover_tools(self, request: VerificationRequest, report: ReportBuilder) -> Reason | None:
-        reason: Reason | None = None
+        report = ReportBuilder(request, policy, started_at)
+        self._deadline = self.monotonic() + self.deadline_seconds
+        self._cancel_event = cancel_event
+        self._progress = progress
         try:
-            result = self.runner.run(["gh", "--version"])
-            match = re.search(r"\bgh version ([0-9]+\.[0-9]+\.[0-9]+)\b", result.text)
+            self._emit_progress("tools.discovery")
+            gh_version_reason = self._discover_tools(request, report, policy)
+            self._verify_source(request, report, policy)
+            self._emit_progress("runtime.rollout")
+            first_snapshot = self._first_runtime_snapshot(request, report)
+            self._emit_progress("registry.resolution")
+            registry = self._resolve_registry(request, report)
+            self._emit_progress("attestation.verification")
+            attestation = self._verify_attestation(request, report, registry, gh_version_reason, policy)
+            self._verify_run_and_release(request, report, attestation, policy)
+            if policy.require_cosign_signature:
+                self._emit_progress("signature.cosign")
+                self._verify_cosign(request, report, registry)
+            self._emit_progress("runtime.digest_match")
+            self._reconcile_runtime(request, report, first_snapshot, registry)
+            self._emit_progress("runtime.stable_observation")
+            self._verify_stable_observation(request, report, first_snapshot)
+            return report.finalize(self._now())
+        finally:
+            self._deadline = None
+            self._cancel_event = None
+            self._progress = None
+
+    def _discover_tools(
+        self, request: VerificationRequest, report: ReportBuilder, policy: TrustedPolicy
+    ) -> Reason | None:
+        del request
+        reason: Reason | None = None
+        environment = getattr(self.runner, "environment", None)
+        try:
+            result = self._run(["gh", "--version"])
+            text = redact(result.text, environment)
+            match = re.search(r"\bgh version ([0-9]+\.[0-9]+\.[0-9]+)\b", text)
             if result.returncode != 0 or not match:
                 reason = Reason("GH_VERSION_UNKNOWN", "The installed gh version could not be established.")
             else:
@@ -78,36 +136,45 @@ class ReleaseVerifier:
                         ">=2.102.0",
                         version,
                     )
+        except CommandCancelled:
+            reason = self._cancelled_reason()
+        except CommandTimeout:
+            reason = self._timeout_reason("GH_UNAVAILABLE", "gh is unavailable or its version check timed out.")
         except (RunnerError, UnicodeDecodeError):
             reason = Reason("GH_UNAVAILABLE", "gh is unavailable or its version check timed out.")
 
         try:
-            result = self.runner.run(["crane", "version"])
+            result = self._run(["crane", "version"])
             if result.returncode == 0:
-                match = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", result.text)
-                report.tools["crane"] = match.group(0) if match else result.text.strip()[:100]
+                text = redact(result.text, environment)
+                match = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", text)
+                report.tools["crane"] = match.group(0) if match else text.strip()[:100]
         except (RunnerError, UnicodeDecodeError):
             pass
         try:
-            result = self.runner.run(["kubectl", "version", "--client", "-o", "json"])
+            result = self._run(["kubectl", "version", "--client", "-o", "json"])
             if result.returncode == 0:
                 payload = json.loads(result.text)
                 version = payload.get("clientVersion", {}).get("gitVersion")
                 if isinstance(version, str):
-                    report.tools["kubectl"] = version.removeprefix("v")
+                    report.tools["kubectl"] = redact(version.removeprefix("v"), environment)[:100]
         except (RunnerError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
             pass
-        if request.require_cosign_signature:
+        if policy.require_cosign_signature:
             try:
-                result = self.runner.run(["cosign", "version"])
+                result = self._run(["cosign", "version"])
                 if result.returncode == 0:
-                    match = re.search(r"v?([0-9]+\.[0-9]+\.[0-9]+)", result.text)
-                    report.tools["cosign"] = match.group(1) if match else result.text.strip()[:100]
+                    text = redact(result.text, environment)
+                    match = re.search(r"v?([0-9]+\.[0-9]+\.[0-9]+)", text)
+                    report.tools["cosign"] = match.group(1) if match else text.strip()[:100]
             except (RunnerError, UnicodeDecodeError):
                 pass
         return reason
 
-    def _verify_source(self, request: VerificationRequest, report: ReportBuilder) -> None:
+    def _verify_source(
+        self, request: VerificationRequest, report: ReportBuilder, policy: TrustedPolicy
+    ) -> None:
+        self._emit_progress("source.commit")
         try:
             result = self._json_command(
                 ["gh", "api", f"repos/{request.repo}/commits/{request.expected_commit}"],
@@ -120,9 +187,10 @@ class ReleaseVerifier:
         except (EvidenceError, PolicyViolation) as error:
             self._record_error(report, "source.commit", error, ("commit",))
 
+        self._emit_progress("source.review")
         try:
             pr = self._json_command(
-                ["gh", "api", f"repos/{request.repo}/pulls/{request.review.pull_request}"],
+                ["gh", "api", f"repos/{request.repo}/pulls/{policy.review.pull_request}"],
                 unavailable="GITHUB_UNAVAILABLE",
                 denied="GITHUB_ACCESS_DENIED",
                 not_found=Reason("REVIEW_POLICY_FAILED", "The requested pull request was not found."),
@@ -133,13 +201,13 @@ class ReleaseVerifier:
                     "api",
                     "--paginate",
                     "--slurp",
-                    f"repos/{request.repo}/pulls/{request.review.pull_request}/reviews?per_page=100",
+                    f"repos/{request.repo}/pulls/{policy.review.pull_request}/reviews?per_page=100",
                 ],
                 unavailable="GITHUB_UNAVAILABLE",
                 denied="GITHUB_ACCESS_DENIED",
             )
             pr_evidence, review_evidence = validate_review(
-                pr, reviews, request.review, request.repo, request.expected_commit
+                pr, reviews, policy.review, request.repo, request.expected_commit
             )
             report.evidence["pull_request"] = pr_evidence
             report.evidence["reviews"] = review_evidence
@@ -178,14 +246,16 @@ class ReleaseVerifier:
             denied="RUNTIME_ACCESS_DENIED",
             invalid="RUNTIME_EVIDENCE_INVALID",
         )
+        selector = deployment_label_selector(deployment)
+        list_options = ["--selector", selector] if selector is not None else []
         replicasets = self._json_command(
-            base + ["get", "replicasets", "-o", "json"],
+            base + ["get", "replicasets", *list_options, "-o", "json"],
             unavailable="RUNTIME_UNAVAILABLE",
             denied="RUNTIME_ACCESS_DENIED",
             invalid="RUNTIME_EVIDENCE_INVALID",
         )
         pods = self._json_command(
-            base + ["get", "pods", "-o", "json"],
+            base + ["get", "pods", *list_options, "-o", "json"],
             unavailable="RUNTIME_UNAVAILABLE",
             denied="RUNTIME_ACCESS_DENIED",
             invalid="RUNTIME_EVIDENCE_INVALID",
@@ -201,10 +271,24 @@ class ReleaseVerifier:
                 unavailable="REGISTRY_UNAVAILABLE",
                 denied="REGISTRY_ACCESS_DENIED",
             )
-            digest = result.text.strip()
-            if not SHA256_RE.fullmatch(digest) or digest != result.text.strip("\r\n").strip():
+            raw_digest = result.text
+            digest = raw_digest.strip()
+            if not SHA256_RE.fullmatch(digest) or raw_digest not in {
+                digest,
+                digest + "\n",
+                digest + "\r\n",
+            }:
                 raise EvidenceError(
                     Reason("REGISTRY_RESPONSE_INVALID", "crane digest did not return exactly one sha256 digest.")
+                )
+            if request.artifact.is_digest and digest != request.artifact.reference:
+                raise EvidenceError(
+                    Reason(
+                        "REGISTRY_DIGEST_MISMATCH",
+                        "crane moved a digest-pinned input to a different digest.",
+                        request.artifact.reference,
+                        digest,
+                    )
                 )
             pinned = request.pinned_artifact(digest)
             manifest_result = self._command(
@@ -232,26 +316,44 @@ class ReleaseVerifier:
                 raise EvidenceError(
                     Reason("REGISTRY_RESPONSE_INVALID", "The OCI manifest lacks schemaVersion 2.")
                 )
+            media_type = manifest.get("mediaType")
+            if media_type not in INDEX_MEDIA_TYPES | MANIFEST_MEDIA_TYPES:
+                raise EvidenceError(
+                    Reason("REGISTRY_RESPONSE_INVALID", "The OCI object has no recognized manifest or index media type.")
+                )
             children: frozenset[str] = frozenset()
-            if "manifests" in manifest:
+            if media_type in INDEX_MEDIA_TYPES:
+                if "config" in manifest or "layers" in manifest:
+                    raise EvidenceError(
+                        Reason("REGISTRY_RESPONSE_INVALID", "An OCI index cannot contain image-manifest config or layers fields.")
+                    )
                 descriptors = manifest.get("manifests")
                 if not isinstance(descriptors, list):
                     raise EvidenceError(
-                        Reason("REGISTRY_RESPONSE_INVALID", "The OCI index manifests field is not an array.")
+                        Reason("REGISTRY_RESPONSE_INVALID", "The OCI index manifests field is missing or not an array.")
                     )
-                child_digests = [
-                    item.get("digest")
-                    for item in descriptors
-                    if isinstance(item, dict)
-                    and isinstance(item.get("digest"), str)
-                    and SHA256_RE.fullmatch(item["digest"])
-                ]
+                child_digests: list[str] = []
+                for item in descriptors:
+                    digest_value = item.get("digest") if isinstance(item, dict) else None
+                    if not isinstance(digest_value, str) or not SHA256_RE.fullmatch(digest_value):
+                        raise EvidenceError(
+                            Reason("REGISTRY_RESPONSE_INVALID", "An OCI index descriptor lacks a valid sha256 digest.")
+                        )
+                    child_digests.append(digest_value)
                 children = frozenset(child_digests)
-            media_type = manifest.get("mediaType")
+            else:
+                if "manifests" in manifest:
+                    raise EvidenceError(
+                        Reason("REGISTRY_RESPONSE_INVALID", "An image manifest cannot contain an index manifests field.")
+                    )
+                if not isinstance(manifest.get("config"), dict) or not isinstance(manifest.get("layers"), list):
+                    raise EvidenceError(
+                        Reason("REGISTRY_RESPONSE_INVALID", "An image manifest requires config and layers fields.")
+                    )
             report.evidence["registry"] = {
                 "digest": digest,
                 "pinned_artifact": pinned,
-                "media_type": media_type if isinstance(media_type, str) else None,
+                "media_type": media_type,
                 "manifest_url": f"https://ghcr.io/v2/{request.artifact.path}/manifests/{digest}",
                 "resolved_at": self._now(),
             }
@@ -271,7 +373,29 @@ class ReleaseVerifier:
         report: ReportBuilder,
         registry: dict[str, Any] | None,
         gh_version_reason: Reason | None,
+        policy: TrustedPolicy,
     ) -> tuple[int, int] | None:
+        if (
+            request.signer_workflow != policy.signer_workflow
+            or request.signer_digest != policy.signer_digest
+        ):
+            self._record_reason(
+                report,
+                "attestation.verification",
+                Reason(
+                    "SIGNER_POLICY_MISMATCH",
+                    "The requested signer workflow or digest differs from the server-side trusted policy.",
+                    {
+                        "signer_workflow": policy.signer_workflow,
+                        "signer_digest": policy.signer_digest,
+                    },
+                    {
+                        "signer_workflow": request.signer_workflow,
+                        "signer_digest": request.signer_digest,
+                    },
+                ),
+            )
+            return None
         if gh_version_reason:
             self._record_reason(report, "attestation.verification", gh_version_reason)
             return None
@@ -311,9 +435,15 @@ class ReleaseVerifier:
             ]
         )
         try:
-            result = self.runner.run(argv)
+            result = self._run(argv)
+        except CommandCancelled:
+            report.unknown("attestation.verification", self._cancelled_reason())
+            return None
         except CommandTimeout:
-            report.unknown("attestation.verification", Reason("ATTESTATION_UNAVAILABLE", "Attestation verification timed out."))
+            report.unknown(
+                "attestation.verification",
+                self._timeout_reason("ATTESTATION_UNAVAILABLE", "Attestation verification timed out."),
+            )
             return None
         except (ToolUnavailable, OutputLimitExceeded, RunnerError):
             report.unknown("attestation.verification", Reason("ATTESTATION_UNAVAILABLE", "Attestation evidence could not be retrieved safely."))
@@ -347,7 +477,9 @@ class ReleaseVerifier:
         request: VerificationRequest,
         report: ReportBuilder,
         attestation: tuple[int, int] | None,
+        policy: TrustedPolicy,
     ) -> None:
+        self._emit_progress("workflow.run")
         if attestation is None:
             report.unknown(
                 "workflow.run",
@@ -359,6 +491,16 @@ class ReleaseVerifier:
             )
             return
         run_id, attempt = attestation
+        if attempt != 1:
+            reason = Reason(
+                "RUN_ATTEMPT_UNSUPPORTED",
+                "GitHub environment approvals are run-level and are not bound to rerun attempts; only attempt 1 is accepted.",
+                1,
+                attempt,
+            )
+            report.failed("workflow.run", reason)
+            report.failed("release.approval", reason)
+            return
         run: Any = None
         try:
             run = self._json_command(
@@ -396,12 +538,13 @@ class ReleaseVerifier:
                 attempt=attempt,
                 expected_commit=request.expected_commit,
                 workflow=request.workflow,
-                event=request.release.event,
+                event=policy.release.event,
             )
             report.verified("workflow.run", ("workflow_run",))
         except (EvidenceError, PolicyViolation) as error:
             self._record_error(report, "workflow.run", error, ("workflow_run",))
 
+        self._emit_progress("release.approval")
         try:
             approvals = self._json_command(
                 ["gh", "api", f"repos/{request.repo}/actions/runs/{run_id}/approvals"],
@@ -409,15 +552,8 @@ class ReleaseVerifier:
                 denied="GITHUB_ACCESS_DENIED",
                 not_found=Reason("RELEASE_APPROVAL_MISSING", "No approval records exist for the certified run."),
             )
-            if not isinstance(run, dict) and request.release.prevent_self_approval:
-                raise EvidenceError(
-                    Reason(
-                        "RUN_ACTOR_EVIDENCE_UNAVAILABLE",
-                        "Self-approval cannot be evaluated without run actor and triggering actor records.",
-                    )
-                )
             report.evidence["release_approvals"] = validate_release_approval(
-                approvals, run, request.release
+                approvals, run, policy.release
             )
             report.verified("release.approval", ("release_approvals",))
         except (EvidenceError, PolicyViolation) as error:
@@ -435,12 +571,20 @@ class ReleaseVerifier:
                 Reason("SIGNATURE_INPUT_UNAVAILABLE", "A verified pinned artifact is required for Cosign verification."),
             )
             return
+        certificate = report.evidence["certificate"] or {}
+        identity = certificate.get("subject_alternative_name") or certificate.get("build_signer_uri")
+        if not request.certificate_identity_matches(identity):
+            report.unknown(
+                "signature.cosign",
+                Reason("SIGNATURE_INPUT_UNAVAILABLE", "A validated certificate identity is required for Cosign verification."),
+            )
+            return
         argv = [
             "cosign",
             "verify",
             registry["pinned"],
             "--certificate-identity",
-            request.certificate_identity,
+            identity,
             "--certificate-oidc-issuer",
             ISSUER,
             "--certificate-github-workflow-repository",
@@ -451,7 +595,16 @@ class ReleaseVerifier:
             "json",
         ]
         try:
-            result = self.runner.run(argv)
+            result = self._run(argv)
+        except CommandCancelled:
+            report.unknown("signature.cosign", self._cancelled_reason())
+            return
+        except CommandTimeout:
+            report.unknown(
+                "signature.cosign",
+                self._timeout_reason("COSIGN_UNAVAILABLE", "Cosign verification timed out."),
+            )
+            return
         except RunnerError:
             report.unknown("signature.cosign", Reason("COSIGN_UNAVAILABLE", "Cosign verification was unavailable or timed out."))
             return
@@ -566,9 +719,11 @@ class ReleaseVerifier:
         not_found: Reason | None = None,
     ) -> CommandResult:
         try:
-            result = self.runner.run(argv)
+            result = self._run(argv)
+        except CommandCancelled as error:
+            raise EvidenceError(self._cancelled_reason()) from error
         except CommandTimeout as error:
-            raise EvidenceError(Reason(unavailable, "The evidence command timed out.")) from error
+            raise EvidenceError(self._timeout_reason(unavailable, "The evidence command timed out.")) from error
         except (ToolUnavailable, OutputLimitExceeded, RunnerError) as error:
             raise EvidenceError(Reason(unavailable, "The evidence command was unavailable or exceeded safety limits.")) from error
         if result.returncode == 0:
@@ -581,6 +736,39 @@ class ReleaseVerifier:
         if not_found and ("404" in stderr or "not found" in stderr):
             raise EvidenceError(not_found)
         raise EvidenceError(Reason(unavailable, "The evidence command failed without conclusive policy evidence."))
+
+    def _run(self, argv: Sequence[str]) -> CommandResult:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise CommandCancelled("Verification was cancelled.")
+        timeout: float | None = None
+        if self._deadline is not None:
+            timeout = self._deadline - self.monotonic()
+            if timeout <= 0:
+                raise CommandTimeout("The overall verification deadline was exceeded.")
+            timeout = min(timeout, getattr(self.runner, "timeout_seconds", timeout))
+        return self.runner.run(argv, timeout=timeout, cancel_event=self._cancel_event)
+
+    def _timeout_reason(self, fallback_code: str, fallback_message: str) -> Reason:
+        if self._deadline is not None and self.monotonic() >= self._deadline:
+            return Reason(
+                "VERIFICATION_DEADLINE_EXCEEDED",
+                "The overall verification deadline was exceeded; remaining evidence is unknown.",
+            )
+        return Reason(fallback_code, fallback_message)
+
+    @staticmethod
+    def _cancelled_reason() -> Reason:
+        return Reason(
+            "VERIFICATION_CANCELLED",
+            "Verification was cancelled; no complete evidence claim was produced.",
+        )
+
+    def _emit_progress(self, stage: str) -> None:
+        if self._progress is not None:
+            try:
+                self._progress(stage)
+            except Exception:
+                pass
 
     def _record_error(
         self,
@@ -611,6 +799,9 @@ class ReleaseVerifier:
             "RUNTIME_EVIDENCE_INVALID",
             "RUNTIME_CHANGED_DURING_VERIFICATION",
             "RUN_ACTOR_EVIDENCE_UNAVAILABLE",
+            "REVIEW_AUTHOR_EVIDENCE_UNAVAILABLE",
+            "VERIFICATION_DEADLINE_EXCEEDED",
+            "VERIFICATION_CANCELLED",
             "ATTESTATION_INPUT_UNAVAILABLE",
             "RUN_IDENTITY_UNAVAILABLE",
             "REGISTRY_DIGEST_UNAVAILABLE",

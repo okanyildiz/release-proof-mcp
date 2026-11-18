@@ -9,6 +9,8 @@ from .report import Reason
 REGISTRY_IMAGE_ID_RE = re.compile(
     r"^(?:docker-pullable://)?[^\s/@]+(?:/[^\s/@]+)+@(?P<digest>sha256:[0-9a-f]{64})$"
 )
+LABEL_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[-A-Za-z0-9_.]*[A-Za-z0-9])?$")
+LABEL_PREFIX_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9.]*[a-z0-9])?$")
 
 
 class RuntimeEvidenceError(ValueError):
@@ -124,6 +126,36 @@ class RuntimeSnapshot:
                 for pod in sorted(self.pods, key=lambda item: (item.uid, item.container))
             ],
         }
+
+
+def deployment_label_selector(deployment: Any) -> str | None:
+    if not isinstance(deployment, dict):
+        return None
+    spec = _dict(deployment.get("spec"))
+    selector = _dict(spec.get("selector"))
+    labels = selector.get("matchLabels")
+    if not isinstance(labels, dict) or not labels:
+        return None
+    terms: list[str] = []
+    for key, value in labels.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            return None
+        key_parts = key.split("/")
+        if len(key_parts) > 2:
+            return None
+        name = key_parts[-1]
+        if not name or len(name) > 63 or not LABEL_NAME_RE.fullmatch(name):
+            return None
+        if len(key_parts) == 2 and (
+            not key_parts[0]
+            or len(key_parts[0]) > 253
+            or not LABEL_PREFIX_RE.fullmatch(key_parts[0])
+        ):
+            return None
+        if len(value) > 63 or (value and not LABEL_NAME_RE.fullmatch(value)):
+            return None
+        terms.append(f"{key}={value}")
+    return ",".join(sorted(terms))
 
 
 def build_snapshot(

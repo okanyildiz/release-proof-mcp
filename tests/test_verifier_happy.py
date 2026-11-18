@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 
 from conftest import (
@@ -9,13 +10,13 @@ from conftest import (
     HEAD,
     INDEX_DIGEST,
     RUN_ID,
+    SIGNER_DIGEST,
     Harness,
     attestation_argv,
     attestation_result,
     check,
     pr_object,
     reviews_page,
-    run_object,
 )
 
 
@@ -30,6 +31,9 @@ def test_single_platform_direct_image_id_happy_path(harness: Harness) -> None:
     assert report["evidence"]["pull_request"]["merge_commit_directly_reviewed"] is False
     assert report["missing_coverage"] == []
     assert report["reasons"] == []
+    bundle = attestation_result()["attestation"]["bundle"]
+    canonical = json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode()
+    assert report["evidence"]["attestation"]["bundle_sha256"] == f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
 def test_runtime_can_report_attested_index_digest(harness: Harness) -> None:
@@ -55,6 +59,7 @@ def test_runtime_child_is_contained_in_attested_index(harness: Harness) -> None:
 
 def test_reusable_signer_workflow_and_exact_signer_digest(harness: Harness) -> None:
     harness.request["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+    harness.policy["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
     harness.set_attestation([
         attestation_result(
             subjectAlternativeName="https://github.com/acme/builders/.github/workflows/reusable.yml@refs/heads/main"
@@ -69,8 +74,42 @@ def test_reusable_signer_workflow_and_exact_signer_digest(harness: Harness) -> N
     assert report["evidence"]["certificate"]["build_signer_digest"] == harness.request["signer_digest"]
 
 
+def test_caller_tag_with_reusable_signer_branch(harness: Harness) -> None:
+    identity = "https://github.com/acme/builders/.github/workflows/reusable.yml@refs/heads/builder-main"
+    harness.request["source_ref"] = "refs/tags/v1.4.0"
+    harness.request["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+    harness.policy["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+    harness.set_attestation([
+        attestation_result(
+            subjectAlternativeName=identity,
+            buildSignerURI=identity,
+            sourceRepositoryRef="refs/tags/v1.4.0",
+        )
+    ])
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"
+    assert report["evidence"]["certificate"]["subject_alternative_name"] == identity
+    assert report["evidence"]["certificate"]["build_signer_digest"] == SIGNER_DIGEST
+
+
+def test_caller_branch_with_sha_pinned_reusable_signer(harness: Harness) -> None:
+    identity = f"https://github.com/acme/builders/.github/workflows/reusable.yml@{SIGNER_DIGEST}"
+    harness.request["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+    harness.policy["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+    harness.set_attestation([
+        attestation_result(subjectAlternativeName=identity, buildSignerURI=identity)
+    ])
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"
+    assert report["evidence"]["certificate"]["build_signer_digest"] == SIGNER_DIGEST
+
+
 def test_exact_head_review_mode(harness: Harness) -> None:
-    harness.request["review"]["mode"] = "exact_head"
+    harness.policy["review"]["mode"] = "exact_head"
     pr = pr_object()
     pr["head"]["sha"] = COMMIT
     pr["merged_at"] = None
@@ -100,7 +139,7 @@ def test_historical_production_approval_on_certified_run(harness: Harness) -> No
 
     assert check(report, "release.approval")["status"] == "verified"
     assert report["evidence"]["release_approvals"] == [
-        {"environment": "production", "approver_id": 2001, "state": "approved", "comment": "Ship it"}
+        {"environment": "production", "approver_id": 2001, "state": "approved"}
     ]
     assert report["evidence"]["workflow_run"]["id"] == RUN_ID
 
@@ -128,7 +167,7 @@ def test_expired_leaf_with_verified_timestamp_is_not_rejected(harness: Harness) 
 
 
 def test_optional_cosign_signature_success(harness: Harness) -> None:
-    harness.request["require_cosign_signature"] = True
+    harness.policy["require_cosign_signature"] = True
     harness.runner.route(["cosign", "version"], "GitHub Cosign v2.5.0")
     harness.runner.route(
         [
@@ -157,12 +196,27 @@ def test_optional_cosign_signature_success(harness: Harness) -> None:
     assert report["tools"]["cosign"] == "2.5.0"
 
 
-def test_second_snapshot_is_actually_read(harness: Harness) -> None:
+def test_second_snapshot_is_actually_read_with_server_side_label_filter(harness: Harness) -> None:
     before = copy.deepcopy(harness.runner.calls)
 
     report = harness.verify()
 
-    pod_call = ("kubectl", "--context", "production", "-n", "production", "get", "pods", "-o", "json")
+    pod_call = (
+        "kubectl", "--context", "production", "-n", "production", "get", "pods",
+        "--selector", "app=shop", "-o", "json",
+    )
     assert harness.runner.calls.count(pod_call) == 2
     assert len(harness.runner.calls) > len(before)
     assert check(report, "runtime.stable_observation")["status"] == "verified"
+
+
+def test_caller_cannot_select_a_different_signer_than_trusted_policy(harness: Harness) -> None:
+    harness.request["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+
+    report = harness.verify()
+
+    attestation_check = check(report, "attestation.verification")
+    assert attestation_check["status"] == "failed"
+    assert attestation_check["reason"]["code"] == "SIGNER_POLICY_MISMATCH"
+    assert not any(call[:3] == ("gh", "attestation", "verify") for call in harness.runner.calls)
+    assert report["status"] == "failed"

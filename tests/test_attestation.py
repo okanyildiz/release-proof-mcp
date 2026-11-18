@@ -93,6 +93,8 @@ def test_certificate_policy_mismatches(
 
 
 def test_signer_identity_prefix_never_counts_as_exact_match(harness: Harness) -> None:
+    harness.request.pop("signer_digest")
+    harness.policy["signer_digest"] = None
     prefix_identity = "https://github.com/acme/shop/.github/workflows/release.yml@refs/heads/main-extra"
     harness.set_attestation([attestation_result(subjectAlternativeName=prefix_identity)])
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -106,9 +108,9 @@ def validate_attestation(
     present_identities = [item for item in identities if isinstance(item, str)]
     _require_certificate(
         bool(present_identities)
-        and all(item == request.certificate_identity for item in present_identities),
+        and all(request.certificate_identity_matches(item) for item in present_identities),
         "SIGNER_MISMATCH",
-        "The certificate signer workflow does not exactly match the approved workflow identity.",
+        "The certificate signer workflow/ref is not approved; a pinned reusable signer may use its own valid ref or digest.",
         request.certificate_identity,
         present_identities or None,
     )
@@ -253,11 +255,17 @@ def _transparency_ids(verification: dict[str, Any]) -> list[str]:
 
 
 def _bundle_digest(result: dict[str, Any]) -> str | None:
-    for key in ("bundle_sha256", "bundleDigest"):
-        value = result.get(key)
-        if isinstance(value, str) and re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", value):
-            return value if value.startswith("sha256:") else f"sha256:{value}"
-    return None
+    attestation = result.get("attestation")
+    bundle = attestation.get("bundle") if isinstance(attestation, dict) else None
+    if not isinstance(bundle, dict):
+        return None
+    try:
+        canonical = json.dumps(
+            bundle, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return None
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 
 
 def _snake_case(value: str) -> str:

@@ -59,8 +59,11 @@ class Check:
 
 
 class ReportBuilder:
-    def __init__(self, request: Any, started_at: str) -> None:
+    MAX_EVIDENCE_ITEMS = 100
+
+    def __init__(self, request: Any, policy: Any, started_at: str) -> None:
         self.request = request
+        self.policy = policy
         self.started_at = started_at
         self.checks: dict[str, Check] = {}
         self.evidence: dict[str, Any] = {
@@ -104,7 +107,7 @@ class ReportBuilder:
 
     def finalize(self, completed_at: str) -> dict[str, Any]:
         for name in CHECK_ORDER:
-            if name == "signature.cosign" and not self.request.require_cosign_signature:
+            if name == "signature.cosign" and not self.policy.require_cosign_signature:
                 continue
             if name not in self.checks:
                 self.unknown(
@@ -124,7 +127,7 @@ class ReportBuilder:
             status = "verified"
             summary = (
                 "Kubernetes reported the OCI image attested by the approved workflow at the "
-                "expected commit; declared review and release policies passed."
+                "expected commit; the server-side review and release policy passed."
             )
         reasons = [
             {"check": check.name, **check.reason.as_dict()}
@@ -137,15 +140,30 @@ class ReportBuilder:
             if check.status == "unknown" and check.reason is not None
         ]
         limitations = [
-            "Point-in-time observation only; future tag pulls are not constrained.",
+            "Observation-window evidence only; future tag pulls and concurrent remote changes are not constrained.",
             "Historical branch-protection and environment configuration are not reconstructed.",
+            "GitHub approvals are run-level, so only certified run attempt 1 is supported.",
             "No vulnerability, reproducibility, node-integrity, or post-start filesystem claim.",
             "A verified signature proves an identity signed evidence, not that the artifact is secure.",
         ]
-        if self.request.review.mode == "merged_pr":
+        if self.policy.review.mode == "merged_pr":
             limitations.insert(
                 1,
                 "Merged-PR review evidence does not mean the merge commit itself was directly reviewed.",
+            )
+        truncation: dict[str, Any] = {}
+        for key in ("reviews", "release_approvals", "pods"):
+            values = self.evidence[key]
+            if isinstance(values, list) and len(values) > self.MAX_EVIDENCE_ITEMS:
+                omitted = len(values) - self.MAX_EVIDENCE_ITEMS
+                self.evidence[key] = values[: self.MAX_EVIDENCE_ITEMS]
+                truncation[key] = {
+                    "retained": self.MAX_EVIDENCE_ITEMS,
+                    "omitted": omitted,
+                }
+        if truncation:
+            limitations.append(
+                "Receipt evidence arrays are capped at 100 entries; evidence_truncation records omitted entries."
             )
         return {
             "schema_version": SCHEMA_VERSION,
@@ -167,10 +185,13 @@ class ReportBuilder:
                 "deployment": self.request.deployment,
                 "container": self.request.container,
             },
+            "effective_policy": self.policy.effective(),
+            "policy_hash": self.policy.sha256,
             "checks": [check.as_dict() for check in ordered],
             "reasons": reasons,
             "missing_coverage": missing_coverage,
             "evidence": self.evidence,
+            "evidence_truncation": truncation,
             "tools": self.tools,
             "limitations": limitations,
         }

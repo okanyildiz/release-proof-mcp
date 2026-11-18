@@ -11,8 +11,55 @@ WORKFLOW_RE = re.compile(r"^\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml$")
 IMAGE_SEGMENT_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 KUBE_NAME_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$")
+POLICY_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 ISSUER = "https://token.actions.githubusercontent.com"
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
+
+REVIEW_POLICY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "pull_request",
+        "mode",
+        "min_approvals",
+        "allowed_reviewer_ids",
+        "require_non_author",
+    ],
+    "properties": {
+        "pull_request": {"type": "integer", "minimum": 1},
+        "mode": {"type": "string", "enum": ["exact_head", "merged_pr"]},
+        "min_approvals": {"type": "integer", "minimum": 1},
+        "allowed_reviewer_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": True,
+            "items": {"type": "integer", "minimum": 1},
+        },
+        "require_non_author": {"type": "boolean"},
+    },
+}
+
+RELEASE_POLICY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "event",
+        "environment",
+        "required_approver_ids",
+        "prevent_self_approval",
+    ],
+    "properties": {
+        "event": {"type": "string", "minLength": 1, "maxLength": 100},
+        "environment": {"type": "string", "minLength": 1, "maxLength": 255},
+        "required_approver_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": True,
+            "items": {"type": "integer", "minimum": 1},
+        },
+        "prevent_self_approval": {"type": "boolean"},
+    },
+}
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -27,8 +74,6 @@ INPUT_SCHEMA: dict[str, Any] = {
         "namespace",
         "deployment",
         "container",
-        "review",
-        "release",
     ],
     "properties": {
         "repo": {"type": "string", "pattern": REPO_RE.pattern},
@@ -47,60 +92,15 @@ INPUT_SCHEMA: dict[str, Any] = {
         "namespace": {"type": "string", "pattern": KUBE_NAME_RE.pattern, "maxLength": 63},
         "deployment": {"type": "string", "pattern": KUBE_NAME_RE.pattern, "maxLength": 253},
         "container": {"type": "string", "pattern": KUBE_NAME_RE.pattern, "maxLength": 63},
-        "review": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "pull_request",
-                "mode",
-                "min_approvals",
-                "allowed_reviewer_ids",
-                "require_non_author",
-            ],
-            "properties": {
-                "pull_request": {"type": "integer", "minimum": 1},
-                "mode": {"type": "string", "enum": ["exact_head", "merged_pr"]},
-                "min_approvals": {"type": "integer", "minimum": 1},
-                "allowed_reviewer_ids": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": True,
-                    "items": {"type": "integer", "minimum": 1},
-                },
-                "require_non_author": {"type": "boolean"},
-            },
-        },
-        "release": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "event",
-                "environment",
-                "required_approver_ids",
-                "prevent_self_approval",
-            ],
-            "properties": {
-                "event": {"type": "string", "minLength": 1, "maxLength": 100},
-                "environment": {"type": "string", "minLength": 1, "maxLength": 255},
-                "required_approver_ids": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": True,
-                    "items": {"type": "integer", "minimum": 1},
-                },
-                "prevent_self_approval": {"type": "boolean"},
-            },
-        },
         "expected_run": {
             "type": "object",
             "additionalProperties": False,
             "required": ["id", "attempt"],
             "properties": {
                 "id": {"type": "integer", "minimum": 1},
-                "attempt": {"type": "integer", "minimum": 1},
+                "attempt": {"type": "integer", "minimum": 1, "maximum": 1},
             },
         },
-        "require_cosign_signature": {"type": "boolean", "default": False},
     },
 }
 
@@ -160,10 +160,7 @@ class VerificationRequest:
     namespace: str
     deployment: str
     container: str
-    review: ReviewPolicy
-    release: ReleasePolicy
     expected_run: ExpectedRun | None
-    require_cosign_signature: bool
 
     @property
     def certificate_identity(self) -> str:
@@ -171,6 +168,19 @@ class VerificationRequest:
         if not workflow.startswith("github.com/"):
             workflow = f"github.com/{workflow}"
         return f"https://{workflow}@{self.source_ref}"
+
+    def certificate_identity_matches(self, identity: Any) -> bool:
+        if not isinstance(identity, str):
+            return False
+        prefix = self.certificate_identity.rsplit("@", 1)[0] + "@"
+        if not identity.startswith(prefix):
+            return False
+        signer_ref = identity[len(prefix) :]
+        if self.signer_digest is None:
+            return signer_ref == self.source_ref
+        if signer_ref == self.signer_digest:
+            return True
+        return signer_ref.startswith(("refs/heads/", "refs/tags/")) and _valid_ref(signer_ref)
 
     @property
     def source_repository_uri(self) -> str:
@@ -201,11 +211,18 @@ class VerificationRequest:
         signer_workflow = value.get("signer_workflow", f"{repo}/{workflow}")
         if not isinstance(signer_workflow, str):
             raise ValidationError("signer_workflow must be a string.")
-        signer_workflow = _validate_signer_workflow(signer_workflow)
+        signer_workflow = validate_signer_workflow(signer_workflow)
         signer_digest = value.get("signer_digest")
         if signer_digest is not None:
             if not isinstance(signer_digest, str) or not COMMIT_RE.fullmatch(signer_digest):
                 raise ValidationError("signer_digest must be a full lowercase commit SHA.")
+        signer_repository = "/".join(
+            signer_workflow.removeprefix("github.com/").split("/")[:2]
+        )
+        if signer_repository != repo and signer_digest is None:
+            raise ValidationError(
+                "signer_digest is required when signer_workflow belongs to another repository."
+            )
 
         kube_context = _string(value, "kube_context")
         if any(ord(char) < 32 for char in kube_context) or kube_context.strip() != kube_context:
@@ -214,41 +231,6 @@ class VerificationRequest:
         deployment = _string(value, "deployment", KUBE_NAME_RE)
         container = _string(value, "container", KUBE_NAME_RE)
 
-        review_value = value["review"]
-        if not isinstance(review_value, dict):
-            raise ValidationError("review must be an object.")
-        review_schema = INPUT_SCHEMA["properties"]["review"]
-        _reject_unknown(review_value, set(review_schema["properties"]), "review")
-        _require_fields(review_value, review_schema["required"], "review")
-        review = ReviewPolicy(
-            pull_request=_integer(review_value, "pull_request", minimum=1),
-            mode=_choice(review_value, "mode", {"exact_head", "merged_pr"}),
-            min_approvals=_integer(review_value, "min_approvals", minimum=1),
-            allowed_reviewer_ids=frozenset(
-                _id_array(review_value, "allowed_reviewer_ids", nonempty=True)
-            ),
-            require_non_author=_boolean(review_value, "require_non_author"),
-        )
-
-        release_value = value["release"]
-        if not isinstance(release_value, dict):
-            raise ValidationError("release must be an object.")
-        release_schema = INPUT_SCHEMA["properties"]["release"]
-        _reject_unknown(release_value, set(release_schema["properties"]), "release")
-        _require_fields(release_value, release_schema["required"], "release")
-        event = _string(release_value, "event")
-        environment = _string(release_value, "environment")
-        if any(ord(char) < 32 for char in event + environment):
-            raise ValidationError("release event and environment must not contain control characters.")
-        release = ReleasePolicy(
-            event=event,
-            environment=environment,
-            required_approver_ids=frozenset(
-                _id_array(release_value, "required_approver_ids", nonempty=True)
-            ),
-            prevent_self_approval=_boolean(release_value, "prevent_self_approval"),
-        )
-
         expected_run = None
         if "expected_run" in value:
             run_value = value["expected_run"]
@@ -256,14 +238,16 @@ class VerificationRequest:
                 raise ValidationError("expected_run must be an object.")
             _reject_unknown(run_value, {"id", "attempt"}, "expected_run")
             _require_fields(run_value, ["id", "attempt"], "expected_run")
+            attempt = _integer(run_value, "attempt", minimum=1)
+            if attempt != 1:
+                raise ValidationError(
+                    "expected_run.attempt must be 1 because GitHub run approvals are not attempt-bound."
+                )
             expected_run = ExpectedRun(
                 id=_integer(run_value, "id", minimum=1),
-                attempt=_integer(run_value, "attempt", minimum=1),
+                attempt=attempt,
             )
 
-        require_cosign = value.get("require_cosign_signature", False)
-        if not isinstance(require_cosign, bool):
-            raise ValidationError("require_cosign_signature must be a boolean.")
         return cls(
             repo=repo,
             expected_commit=expected_commit,
@@ -276,11 +260,45 @@ class VerificationRequest:
             namespace=namespace,
             deployment=deployment,
             container=container,
-            review=review,
-            release=release,
             expected_run=expected_run,
-            require_cosign_signature=require_cosign,
         )
+
+
+def review_policy_from_dict(value: Any) -> ReviewPolicy:
+    if not isinstance(value, dict):
+        raise ValidationError("review policy must be an object.")
+    _reject_unknown(value, set(REVIEW_POLICY_SCHEMA["properties"]), "review")
+    _require_fields(value, REVIEW_POLICY_SCHEMA["required"], "review")
+    return ReviewPolicy(
+        pull_request=_integer(value, "pull_request", minimum=1),
+        mode=_choice(value, "mode", {"exact_head", "merged_pr"}),
+        min_approvals=_integer(value, "min_approvals", minimum=1),
+        allowed_reviewer_ids=frozenset(_id_array(value, "allowed_reviewer_ids", nonempty=True)),
+        require_non_author=_boolean(value, "require_non_author"),
+    )
+
+
+def release_policy_from_dict(value: Any) -> ReleasePolicy:
+    if not isinstance(value, dict):
+        raise ValidationError("release policy must be an object.")
+    _reject_unknown(value, set(RELEASE_POLICY_SCHEMA["properties"]), "release")
+    _require_fields(value, RELEASE_POLICY_SCHEMA["required"], "release")
+    event = _string(value, "event")
+    environment = _string(value, "environment")
+    if (
+        len(event) > 100
+        or len(environment) > 255
+        or any(ord(char) < 32 for char in event + environment)
+    ):
+        raise ValidationError("release event and environment contain invalid characters or are too long.")
+    return ReleasePolicy(
+        event=event,
+        environment=environment,
+        required_approver_ids=frozenset(
+            _id_array(value, "required_approver_ids", nonempty=True)
+        ),
+        prevent_self_approval=_boolean(value, "prevent_self_approval"),
+    )
 
 
 def parse_artifact(value: str) -> ArtifactReference:
@@ -305,7 +323,7 @@ def parse_artifact(value: str) -> ArtifactReference:
     return ArtifactReference(value, path, reference, is_digest)
 
 
-def _validate_signer_workflow(value: str) -> str:
+def validate_signer_workflow(value: str) -> str:
     parts = value.split("/")
     if parts[0] == "github.com":
         parts = parts[1:]

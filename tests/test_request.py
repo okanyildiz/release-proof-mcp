@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import copy
-
 import pytest
 
-from conftest import COMMIT, DIGEST, base_input
+from conftest import COMMIT, DIGEST, base_input, base_policy
+from release_proof_mcp.policy import TrustedPolicy
 from release_proof_mcp.request import INPUT_SCHEMA, ValidationError, VerificationRequest, parse_artifact
 
 
-def test_signer_workflow_and_cosign_defaults() -> None:
+def test_signer_workflow_defaults() -> None:
     value = base_input()
-    for key in ("signer_workflow", "signer_digest", "expected_run", "require_cosign_signature"):
+    for key in ("signer_workflow", "signer_digest", "expected_run"):
         value.pop(key)
 
     request = VerificationRequest.from_dict(value)
@@ -18,7 +17,6 @@ def test_signer_workflow_and_cosign_defaults() -> None:
     assert request.signer_workflow == "acme/shop/.github/workflows/release.yml"
     assert request.signer_digest is None
     assert request.expected_run is None
-    assert request.require_cosign_signature is False
 
 
 def test_digest_artifact_is_accepted_and_normalized() -> None:
@@ -43,6 +41,23 @@ def test_github_host_prefixed_signer_workflow() -> None:
     )
 
 
+def test_external_reusable_builder_requires_signer_digest() -> None:
+    value = base_input()
+    value["signer_workflow"] = "acme/builders/.github/workflows/reusable.yml"
+    value.pop("signer_digest")
+
+    with pytest.raises(ValidationError, match="signer_digest is required"):
+        VerificationRequest.from_dict(value)
+
+
+def test_rerun_attempt_is_rejected_before_verification() -> None:
+    value = base_input()
+    value["expected_run"]["attempt"] = 2
+
+    with pytest.raises(ValidationError, match="not attempt-bound"):
+        VerificationRequest.from_dict(value)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -62,6 +77,7 @@ def test_github_host_prefixed_signer_workflow() -> None:
         ("source_ref", "refs/heads/main..other"),
         ("signer_workflow", "evil.com/acme/shop/.github/workflows/release.yml"),
         ("signer_digest", "abc"),
+        ("policy_profile", "../weak"),
         ("namespace", "--all-namespaces"),
         ("deployment", "--help"),
         ("container", "API"),
@@ -93,7 +109,16 @@ def test_missing_container_is_rejected() -> None:
         VerificationRequest.from_dict(payload)
 
 
-@pytest.mark.parametrize("location", ["input", "review", "release", "expected_run"])
+@pytest.mark.parametrize("field", ["review", "release", "require_cosign_signature", "policy_profile"])
+def test_caller_cannot_supply_select_or_weaken_policy(field: str) -> None:
+    payload = base_input()
+    payload[field] = base_policy().get(field, "production" if field == "policy_profile" else False)
+
+    with pytest.raises(ValidationError, match="Unknown input field"):
+        VerificationRequest.from_dict(payload)
+
+
+@pytest.mark.parametrize("location", ["input", "expected_run"])
 def test_unknown_fields_are_rejected(location: str) -> None:
     payload = base_input()
     if location == "input":
@@ -119,19 +144,23 @@ def test_unknown_fields_are_rejected(location: str) -> None:
     ],
 )
 def test_nested_schema_types_are_strict(section: str, field: str, value: object) -> None:
-    payload = base_input()
-    payload[section][field] = value
+    if section == "expected_run":
+        payload = base_input()
+        payload[section][field] = value
+        with pytest.raises(ValidationError):
+            VerificationRequest.from_dict(payload)
+    else:
+        policy = base_policy()
+        policy[section][field] = value
+        with pytest.raises(ValueError):
+            TrustedPolicy.from_dict("production", policy)
 
-    with pytest.raises(ValidationError):
-        VerificationRequest.from_dict(payload)
 
-
-def test_input_schema_is_closed_at_every_object_level() -> None:
+def test_input_schema_is_closed_and_policy_is_not_model_visible() -> None:
     assert INPUT_SCHEMA["additionalProperties"] is False
-    assert INPUT_SCHEMA["properties"]["review"]["additionalProperties"] is False
-    assert INPUT_SCHEMA["properties"]["release"]["additionalProperties"] is False
     assert INPUT_SCHEMA["properties"]["expected_run"]["additionalProperties"] is False
     assert "container" in INPUT_SCHEMA["required"]
+    assert not {"review", "release", "require_cosign_signature", "policy_profile"} & set(INPUT_SCHEMA["properties"])
 
 
 def test_non_object_input_is_rejected() -> None:

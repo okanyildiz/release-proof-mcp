@@ -68,6 +68,15 @@ def base_input() -> dict[str, Any]:
         "namespace": "production",
         "deployment": "shop-api",
         "container": "api",
+        "expected_run": {"id": RUN_ID, "attempt": ATTEMPT},
+    }
+
+
+def base_policy() -> dict[str, Any]:
+    return {
+        "version": "test-v1",
+        "signer_workflow": "acme/shop/.github/workflows/release.yml",
+        "signer_digest": SIGNER_DIGEST,
         "review": {
             "pull_request": 123,
             "mode": "merged_pr",
@@ -81,9 +90,19 @@ def base_input() -> dict[str, Any]:
             "required_approver_ids": [2001, 2002],
             "prevent_self_approval": True,
         },
-        "expected_run": {"id": RUN_ID, "attempt": ATTEMPT},
         "require_cosign_signature": False,
     }
+
+
+def policy_store():
+    from release_proof_mcp.policy import PolicyStore
+
+    return PolicyStore.from_dict(
+        {
+            "schema_version": "release-proof-policy/v1",
+            "profiles": {"production": base_policy()},
+        }
+    )
 
 
 def certificate(**overrides: Any) -> dict[str, Any]:
@@ -96,7 +115,6 @@ def certificate(**overrides: Any) -> dict[str, Any]:
         "sourceRepositoryRef": "refs/heads/main",
         "runnerEnvironment": "github-hosted",
         "runInvocationURI": f"https://github.com/acme/shop/actions/runs/{RUN_ID}/attempts/{ATTEMPT}",
-        "notAfter": "2020-01-01T00:00:00Z",
     }
     value.update(overrides)
     return value
@@ -104,6 +122,20 @@ def certificate(**overrides: Any) -> dict[str, Any]:
 
 def attestation_result(digest: str = DIGEST, **certificate_overrides: Any) -> dict[str, Any]:
     return {
+        "attestation": {
+            "bundle": {
+                "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+                "verificationMaterial": {
+                    "certificate": {"rawBytes": "Q0VSVElGSUNBVEU="},
+                    "tlogEntries": [{"logIndex": "9876"}],
+                },
+                "dsseEnvelope": {
+                    "payload": "U1RBVEVNRU5U",
+                    "payloadType": "application/vnd.in-toto+json",
+                    "signatures": [{"sig": "U0lHTkFUVVJF"}],
+                },
+            }
+        },
         "verificationResult": {
             "signature": {"certificate": certificate(**certificate_overrides)},
             "verifiedTimestamps": [
@@ -121,7 +153,6 @@ def attestation_result(digest: str = DIGEST, **certificate_overrides: Any) -> di
                 "predicate": {"buildDefinition": {"resolvedDependencies": [{"digest": {"sha1": "untrusted"}}]}},
             },
         },
-        "bundle_sha256": "d" * 64,
     }
 
 
@@ -134,7 +165,9 @@ def deployment_object() -> dict[str, Any]:
         },
         "spec": {
             "replicas": 1,
+            "selector": {"matchLabels": {"app": "shop"}},
             "template": {
+                "metadata": {"labels": {"app": "shop"}},
                 "spec": {"containers": [{"name": "api", "image": ARTIFACT}]},
             },
         },
@@ -302,8 +335,14 @@ class FakeRunner:
     def route_json(self, argv: Sequence[str], value: Any, *, returncode: int = 0, stderr: str = "") -> None:
         self.route(argv, json.dumps(value, separators=(",", ":")), returncode=returncode, stderr=stderr)
 
-    def run(self, argv: Sequence[str], *, timeout: float | None = None) -> CommandResult:
-        del timeout
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float | None = None,
+        cancel_event: Any | None = None,
+    ) -> CommandResult:
+        del timeout, cancel_event
         key = tuple(argv)
         self.calls.append(key)
         if key not in self.routes:
@@ -319,14 +358,35 @@ class FakeRunner:
 class Harness:
     runner: FakeRunner
     request: dict[str, Any]
+    policy: dict[str, Any]
 
-    def verify(self) -> dict[str, Any]:
+    def verify(
+        self,
+        *,
+        cancel_event: Any | None = None,
+        progress: Any | None = None,
+        deadline_seconds: float = 120.0,
+        monotonic: Any | None = None,
+    ) -> dict[str, Any]:
+        from release_proof_mcp.policy import TrustedPolicy
+
         parsed = VerificationRequest.from_dict(copy.deepcopy(self.request))
+        policy = TrustedPolicy.from_dict("production", copy.deepcopy(self.policy))
+        options: dict[str, Any] = {}
+        if monotonic is not None:
+            options["monotonic"] = monotonic
         verifier = ReleaseVerifier(
             self.runner,
             clock=lambda: datetime(2026, 11, 18, 12, 0, 0, tzinfo=timezone.utc),
+            deadline_seconds=deadline_seconds,
+            **options,
         )
-        return verifier.verify(parsed)
+        return verifier.verify(
+            parsed,
+            policy,
+            cancel_event=cancel_event,
+            progress=progress,
+        )
 
     def set_attestation(
         self,
@@ -365,13 +425,23 @@ class Harness:
         pods: Any | None = None,
         second_pods: Any | None = None,
     ) -> None:
+        from release_proof_mcp.runtime import deployment_label_selector
+
         base = ["kubectl", "--context", "production", "-n", "production"]
-        self.runner.route_json(base + ["get", "deployment", "shop-api", "-o", "json"], deployment or deployment_object())
-        self.runner.route_json(base + ["get", "replicasets", "-o", "json"], replicasets or {"items": [replicaset_object()]})
+        deployment_value = deployment or deployment_object()
+        selector = deployment_label_selector(deployment_value)
+        list_options = ["--selector", selector] if selector is not None else []
+        self.runner.route_json(
+            base + ["get", "deployment", "shop-api", "-o", "json"], deployment_value
+        )
+        self.runner.route_json(
+            base + ["get", "replicasets", *list_options, "-o", "json"],
+            replicasets or {"items": [replicaset_object()]},
+        )
         first = pods or {"items": [pod_object()]}
         second = second_pods if second_pods is not None else first
         self.runner.route_many(
-            base + ["get", "pods", "-o", "json"],
+            base + ["get", "pods", *list_options, "-o", "json"],
             [CommandResult(0, _bytes(json.dumps(first)), ""), CommandResult(0, _bytes(json.dumps(second)), "")],
         )
 
@@ -415,6 +485,6 @@ def harness() -> Harness:
     runner.route_json(
         ["gh", "api", f"repos/acme/shop/actions/runs/{RUN_ID}/approvals"], approvals_object()
     )
-    harness = Harness(runner, request)
+    harness = Harness(runner, request, base_policy())
     harness.set_runtime()
     return harness
