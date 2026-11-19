@@ -37,11 +37,15 @@ def test_stable_report_schema_and_check_order(harness: Harness) -> None:
 
     assert list(report) == [
         "schema_version",
+        "receipt_id",
+        "consumer_nonce",
+        "verifier",
         "status",
         "summary",
         "started_at",
         "completed_at",
         "subject",
+        "policy_descriptor",
         "effective_policy",
         "policy_hash",
         "checks",
@@ -63,10 +67,13 @@ def test_stable_report_schema_and_check_order(harness: Harness) -> None:
     json.dumps(report, allow_nan=False)
 
 
-def test_repeated_verification_has_deterministic_json(harness: Harness) -> None:
+def test_repeated_verification_is_deterministic_except_receipt_id(harness: Harness) -> None:
     first = harness.verify()
     second = harness.verify()
 
+    assert first["receipt_id"] != second["receipt_id"]
+    first.pop("receipt_id")
+    second.pop("receipt_id")
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
 

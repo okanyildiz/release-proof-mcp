@@ -149,7 +149,8 @@ class PolicyStore:
     def from_file(cls, path: str | Path) -> "PolicyStore":
         policy_path = Path(path)
         try:
-            raw = policy_path.read_bytes()
+            with policy_path.open("rb") as policy_file:
+                raw = policy_file.read(MAX_POLICY_FILE_BYTES + 1)
         except OSError as error:
             raise PolicyConfigurationError("Trusted policy file could not be read.") from error
         if len(raw) > MAX_POLICY_FILE_BYTES:

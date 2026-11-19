@@ -46,7 +46,7 @@ INDEX_MEDIA_TYPES = frozenset(
 )
 MANIFEST_MEDIA_TYPES = frozenset(
     {
-        "application/vnd.oci.image.manifest.v2+json",
+        "application/vnd.oci.image.manifest.v1+json",
         "application/vnd.docker.distribution.manifest.v2+json",
     }
 )
@@ -66,13 +66,29 @@ class ReleaseVerifier:
         clock: Callable[[], datetime] | None = None,
         deadline_seconds: float = 120.0,
         monotonic: Callable[[], float] = time.monotonic,
+        verifier_instance_id: str | None = None,
+        build_digest: str | None = None,
     ) -> None:
         if deadline_seconds <= 0:
             raise ValueError("The overall verification deadline must be positive.")
+        if verifier_instance_id is not None and (
+            not isinstance(verifier_instance_id, str)
+            or not verifier_instance_id
+            or len(verifier_instance_id) > 128
+            or verifier_instance_id.strip() != verifier_instance_id
+            or any(ord(char) < 32 or ord(char) == 127 for char in verifier_instance_id)
+        ):
+            raise ValueError("verifier_instance_id must be a nonempty string of at most 128 characters.")
+        if build_digest is not None and (
+            not isinstance(build_digest, str) or not SHA256_RE.fullmatch(build_digest)
+        ):
+            raise ValueError("build_digest must be null or a lowercase sha256 digest.")
         self.runner = runner or ProcessRunner()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.deadline_seconds = deadline_seconds
         self.monotonic = monotonic
+        self.verifier_instance_id = verifier_instance_id
+        self.build_digest = build_digest
         self._deadline: float | None = None
         self._cancel_event: threading.Event | None = None
         self._progress: Callable[[str], None] | None = None
@@ -86,7 +102,13 @@ class ReleaseVerifier:
         progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         started_at = self._now()
-        report = ReportBuilder(request, policy, started_at)
+        report = ReportBuilder(
+            request,
+            policy,
+            started_at,
+            verifier_instance_id=self.verifier_instance_id,
+            build_digest=self.build_digest,
+        )
         self._deadline = self.monotonic() + self.deadline_seconds
         self._cancel_event = cancel_event
         self._progress = progress
@@ -521,16 +543,25 @@ class ReleaseVerifier:
                     else None,
                 ),
             )
-            if any(
-                certified is not None and current is not None and str(certified) != str(current)
-                for certified, current in identity_pairs
-            ):
-                raise PolicyViolation(
-                    Reason(
-                        "REPOSITORY_ID_MISMATCH",
-                        "Immutable repository or owner identifiers differ between the certificate and run records.",
+            for certified, current in identity_pairs:
+                if certified is None and current is None:
+                    continue
+                certified_id = _normalize_github_id(certified)
+                current_id = _normalize_github_id(current)
+                if certified_id is None or current_id is None:
+                    raise PolicyViolation(
+                        Reason(
+                            "REPOSITORY_ID_EVIDENCE_UNAVAILABLE",
+                            "A supplied immutable repository or owner identifier lacks a valid counterpart.",
+                        )
                     )
-                )
+                if certified_id != current_id:
+                    raise PolicyViolation(
+                        Reason(
+                            "REPOSITORY_ID_MISMATCH",
+                            "Immutable repository or owner identifiers differ between the certificate and run records.",
+                        )
+                    )
             report.evidence["workflow_run"] = validate_workflow_run(
                 run,
                 repo=request.repo,
@@ -552,6 +583,51 @@ class ReleaseVerifier:
                 denied="GITHUB_ACCESS_DENIED",
                 not_found=Reason("RELEASE_APPROVAL_MISSING", "No approval records exist for the certified run."),
             )
+            current_run = self._json_command(
+                ["gh", "api", f"repos/{request.repo}/actions/runs/{run_id}"],
+                unavailable="GITHUB_UNAVAILABLE",
+                denied="GITHUB_ACCESS_DENIED",
+                not_found=Reason(
+                    "RUN_ATTEMPT_UNAVAILABLE",
+                    "The current workflow run attempt could not be retrieved.",
+                ),
+            )
+            if not isinstance(current_run, dict):
+                raise EvidenceError(
+                    Reason("RUN_ATTEMPT_UNAVAILABLE", "The current workflow run evidence is malformed.")
+                )
+            current_id = current_run.get("id")
+            if not isinstance(current_id, int) or isinstance(current_id, bool) or current_id <= 0:
+                raise EvidenceError(
+                    Reason("RUN_ATTEMPT_UNAVAILABLE", "The current workflow run has no valid ID.")
+                )
+            if current_id != run_id:
+                raise PolicyViolation(
+                    Reason(
+                        "RUN_IDENTITY_MISMATCH",
+                        "The current workflow run ID differs from the certified run ID.",
+                        run_id,
+                        current_id,
+                    )
+                )
+            current_attempt = current_run.get("run_attempt")
+            if (
+                not isinstance(current_attempt, int)
+                or isinstance(current_attempt, bool)
+                or current_attempt <= 0
+            ):
+                raise EvidenceError(
+                    Reason("RUN_ATTEMPT_UNAVAILABLE", "The current workflow run has no valid run_attempt.")
+                )
+            if current_attempt != 1:
+                raise PolicyViolation(
+                    Reason(
+                        "RUN_ATTEMPT_UNSUPPORTED",
+                        "The workflow has rerun since attempt 1, so historical run-level approval is not attempt-bound.",
+                        1,
+                        current_attempt,
+                    )
+                )
             report.evidence["release_approvals"] = validate_release_approval(
                 approvals, run, policy.release
             )
@@ -679,6 +755,10 @@ class ReleaseVerifier:
         except (EvidenceError, RuntimeEvidenceError) as error:
             report.unknown("runtime.stable_observation", error.reason, ("pods",))
             return
+        reason = first.observation_reason() or second.observation_reason()
+        if reason:
+            report.unknown("runtime.stable_observation", reason, ("pods",))
+            return
         if first.stability_fingerprint() != second.stability_fingerprint():
             report.unknown(
                 "runtime.stable_observation",
@@ -789,8 +869,11 @@ class ReleaseVerifier:
         if reason.code in {
             "VERIFIER_OUTPUT_INVALID",
             "ATTESTATION_SEARCH_TRUNCATED",
+            "ATTESTATION_EVIDENCE_INVALID",
+            "RELEASE_APPROVAL_EVIDENCE_INVALID",
             "GH_UNAVAILABLE",
             "GH_VERSION_UNKNOWN",
+            "GH_VERSION_UNSUPPORTED",
             "IMAGE_ID_NOT_REGISTRY_COMPARABLE",
             "CONTAINER_STATUS_MISSING",
             "NO_RUNNING_PODS",
@@ -800,6 +883,8 @@ class ReleaseVerifier:
             "RUNTIME_CHANGED_DURING_VERIFICATION",
             "RUN_ACTOR_EVIDENCE_UNAVAILABLE",
             "REVIEW_AUTHOR_EVIDENCE_UNAVAILABLE",
+            "REVIEW_EVIDENCE_INVALID",
+            "SIGNING_TIME_UNVERIFIED",
             "VERIFICATION_DEADLINE_EXCEEDED",
             "VERIFICATION_CANCELLED",
             "ATTESTATION_INPUT_UNAVAILABLE",
@@ -838,6 +923,16 @@ def _attestation_failure_reason(result: CommandResult) -> Reason:
         "ATTESTATION_VERIFICATION_FAILED",
         "gh rejected the attestation; the verifier did not provide a stable, more specific classification.",
     )
+
+
+def _normalize_github_id(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value) if value > 0 else None
+    if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]*", value):
+        return value
+    return None
 
 
 def _version_tuple(value: str) -> tuple[int, int, int]:

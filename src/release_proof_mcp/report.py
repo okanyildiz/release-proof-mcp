@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
-SCHEMA_VERSION = "release-deployment-proof/v1"
+from .version import __version__
+
+SCHEMA_VERSION = "release-deployment-proof/v2"
+VERIFIER_NAME = "release-proof-mcp"
 CHECK_ORDER = [
     "source.commit",
     "source.review",
@@ -61,10 +65,25 @@ class Check:
 class ReportBuilder:
     MAX_EVIDENCE_ITEMS = 100
 
-    def __init__(self, request: Any, policy: Any, started_at: str) -> None:
+    def __init__(
+        self,
+        request: Any,
+        policy: Any,
+        started_at: str,
+        *,
+        verifier_instance_id: str | None = None,
+        build_digest: str | None = None,
+    ) -> None:
         self.request = request
         self.policy = policy
         self.started_at = started_at
+        self.receipt_id = str(uuid4())
+        self.verifier = {
+            "name": VERIFIER_NAME,
+            "version": __version__,
+            "instance_id": verifier_instance_id,
+            "build_digest": build_digest,
+        }
         self.checks: dict[str, Check] = {}
         self.evidence: dict[str, Any] = {
             "commit": None,
@@ -165,8 +184,13 @@ class ReportBuilder:
             limitations.append(
                 "Receipt evidence arrays are capped at 100 entries; evidence_truncation records omitted entries."
             )
+        certificate = self.evidence["certificate"] or {}
+        expected_run = self.request.expected_run
         return {
             "schema_version": SCHEMA_VERSION,
+            "receipt_id": self.receipt_id,
+            "consumer_nonce": self.request.consumer_nonce,
+            "verifier": self.verifier,
             "status": status,
             "summary": summary,
             "started_at": self.started_at,
@@ -180,10 +204,26 @@ class ReportBuilder:
                     if self.evidence["registry"]
                     else None
                 ),
+                "source_ref": self.request.source_ref,
+                "workflow": self.request.workflow,
+                "expected_run": (
+                    {"id": expected_run.id, "attempt": expected_run.attempt}
+                    if expected_run
+                    else None
+                ),
+                "source_repository_id": certificate.get("source_repository_identifier"),
+                "source_repository_owner_id": certificate.get(
+                    "source_repository_owner_identifier"
+                ),
                 "kube_context": self.request.kube_context,
                 "namespace": self.request.namespace,
                 "deployment": self.request.deployment,
                 "container": self.request.container,
+            },
+            "policy_descriptor": {
+                "profile": self.policy.profile,
+                "version": self.policy.version,
+                "hash": self.policy.sha256,
             },
             "effective_policy": self.policy.effective(),
             "policy_hash": self.policy.sha256,

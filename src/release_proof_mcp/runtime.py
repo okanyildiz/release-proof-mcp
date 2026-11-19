@@ -73,10 +73,45 @@ class RuntimeSnapshot:
     revision: str | None
     pods: list[PodObservation] = field(default_factory=list)
 
-    def rollout_reason(self) -> Reason | None:
-        if self.desired == 0:
+    def observation_reason(self) -> Reason | None:
+        if self.desired <= 0:
             return Reason("ROLLOUT_INCOMPLETE", "The Deployment requests zero replicas; nonzero replicas are required.")
-        if self.observed_generation != self.generation:
+        pod_uids = [pod.uid for pod in self.pods]
+        if (
+            len(self.pods) != self.desired
+            or len(set(pod_uids)) != self.desired
+            or any(not uid for uid in pod_uids)
+        ):
+            return Reason(
+                "ROLLOUT_INCOMPLETE",
+                "Exactly desired distinct, nonempty owned Pod UIDs are required.",
+                self.desired,
+                {"observed": len(self.pods), "distinct_uids": len(set(pod_uids))},
+            )
+        if any(not pod.container_id for pod in self.pods):
+            return Reason(
+                "ROLLOUT_INCOMPLETE",
+                "Every owned target Pod requires a nonempty target containerID.",
+            )
+        if (
+            not self.revision
+            or not self.revision.strip()
+            or any(
+                not pod.revision or not pod.revision.strip() or pod.revision != self.revision
+                for pod in self.pods
+            )
+        ):
+            return Reason(
+                "ROLLOUT_INCOMPLETE",
+                "Deployment and owning ReplicaSet rollout revisions must be nonempty and identical.",
+            )
+        return None
+
+    def rollout_reason(self) -> Reason | None:
+        reason = self.observation_reason()
+        if reason:
+            return reason
+        if not _positive_int(self.observed_generation) or self.observed_generation != self.generation:
             return Reason(
                 "ROLLOUT_INCOMPLETE",
                 "The Deployment controller has not observed its current generation.",
@@ -285,6 +320,7 @@ def reconcile_runtime_digests(
     index_children: frozenset[str],
     artifact_is_tag: bool,
 ) -> Reason | None:
+    observation_reason = snapshot.observation_reason()
     running = [pod for pod in snapshot.pods if pod.running]
     missing_status = [
         pod for pod in snapshot.pods if pod.phase == "Running" and not pod.status_present
@@ -295,7 +331,7 @@ def reconcile_runtime_digests(
             "Kubernetes reported a running Pod but omitted the named container's status.",
         )
     if not running:
-        return Reason(
+        return observation_reason or Reason(
             "NO_RUNNING_PODS",
             "No running target containers were observed for the Deployment.",
             "at least one running target container" if snapshot.desired else "nonzero desired replicas",
@@ -341,7 +377,7 @@ def reconcile_runtime_digests(
                 else "The running image digest is neither the attested digest nor a child of the attested index."
             )
             mismatch = mismatch or Reason(code, message, attested_digest, runtime_digest)
-    return mismatch or unknown
+    return mismatch or unknown or observation_reason
 
 
 def _dict(value: Any) -> dict[str, Any]:

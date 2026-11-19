@@ -9,7 +9,12 @@ import pytest
 
 from conftest import base_input, base_policy
 from release_proof_mcp.mcp import MCPServer
-from release_proof_mcp.policy import PolicyConfigurationError, PolicyStore, TrustedPolicy
+from release_proof_mcp.policy import (
+    MAX_POLICY_FILE_BYTES,
+    PolicyConfigurationError,
+    PolicyStore,
+    TrustedPolicy,
+)
 
 
 def policy_config(profiles: dict | None = None) -> dict:
@@ -65,9 +70,21 @@ def test_mcp_loads_active_policy_from_operator_environment(
         def verify(self, request, policy, *, cancel_event, progress) -> dict:
             return {"status": "verified", "effective_policy": policy.effective(), "policy_hash": policy.sha256}
 
-    response = MCPServer(CaptureVerifier).handle({
+    server = MCPServer(CaptureVerifier)
+    server.handle({
         "jsonrpc": "2.0",
         "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "policy-test", "version": "1.0"},
+        },
+    })
+    server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    response = server.handle({
+        "jsonrpc": "2.0",
+        "id": 2,
         "method": "tools/call",
         "params": {"name": "verify_release_deployment", "arguments": base_input()},
     })
@@ -85,3 +102,31 @@ def test_policy_file_rejects_unknown_fields(tmp_path: Path) -> None:
 
     with pytest.raises(PolicyConfigurationError, match="Unknown policy field"):
         PolicyStore.from_file(path)
+
+
+def test_policy_file_read_is_bounded_before_size_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_sizes: list[int] = []
+
+    class FakePolicyFile:
+        def __enter__(self) -> "FakePolicyFile":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def read(self, size: int) -> bytes:
+            read_sizes.append(size)
+            return b"x" * size
+
+    def fake_open(path: Path, mode: str) -> FakePolicyFile:
+        assert mode == "rb"
+        return FakePolicyFile()
+
+    monkeypatch.setattr(Path, "open", fake_open)
+
+    with pytest.raises(PolicyConfigurationError, match="size limit"):
+        PolicyStore.from_file("policy.json")
+
+    assert read_sizes == [MAX_POLICY_FILE_BYTES + 1]

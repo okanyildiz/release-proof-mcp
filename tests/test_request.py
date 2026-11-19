@@ -17,6 +17,54 @@ def test_signer_workflow_defaults() -> None:
     assert request.signer_workflow == "acme/shop/.github/workflows/release.yml"
     assert request.signer_digest is None
     assert request.expected_run is None
+    assert request.consumer_nonce is None
+
+
+@pytest.mark.parametrize("nonce", ["A" * 22, "Ab09_-" + "a" * 16, "_" * 128])
+def test_consumer_nonce_accepts_unpadded_base64url(nonce: str) -> None:
+    value = base_input()
+    value["consumer_nonce"] = nonce
+
+    request = VerificationRequest.from_dict(value)
+
+    assert request.consumer_nonce == nonce
+
+
+@pytest.mark.parametrize(
+    "nonce",
+    ["", "A" * 21, "A" * 129, "A" * 21 + "=", "A" * 21 + "+", "A" * 21 + "\n", None, 123],
+)
+def test_consumer_nonce_rejects_invalid_values(nonce: object) -> None:
+    value = base_input()
+    value["consumer_nonce"] = nonce
+
+    with pytest.raises(ValidationError, match="consumer_nonce"):
+        VerificationRequest.from_dict(value)
+
+
+def test_signer_defaults_can_come_from_trusted_policy() -> None:
+    value = base_input()
+    value.pop("signer_workflow")
+    value.pop("signer_digest")
+    policy = base_policy()
+    signer_workflow = "acme/builders/.github/workflows/reusable.yml"
+
+    request = VerificationRequest.from_dict(
+        value,
+        signer_workflow_default=signer_workflow,
+        signer_digest_default=policy["signer_digest"],
+    )
+
+    assert request.signer_workflow == signer_workflow
+    assert request.signer_digest == policy["signer_digest"]
+
+
+def test_explicit_null_signer_digest_is_rejected_like_the_schema() -> None:
+    value = base_input()
+    value["signer_digest"] = None
+
+    with pytest.raises(ValidationError, match="signer_digest"):
+        VerificationRequest.from_dict(value, signer_digest_default=None)
 
 
 def test_digest_artifact_is_accepted_and_normalized() -> None:
