@@ -61,7 +61,7 @@ Reviewers and contributors should check that changes preserve these invariants:
 - v2 receipts retain UUID4 IDs, optional base64url nonces, full subject and verifier metadata, policy descriptor/effective-policy consistency, and the documented breaking field names.
 - Signed receipts use the standard in-toto Statement and DSSE PAE Ed25519 path. `proof_metadata` is authenticated, and configured signing never silently falls back to unsigned output.
 - Consumers require exact full-subject and full-verifier expectations, policy hash, issuer, trusted key, nonce, and consumer-side maximum age. Freshness is not described as a one-time replay cache.
-- Schema, semantic, and retained-evidence validation remains fail-closed. Documentation must retain the producer trust boundary for live observations, desired replica counts, the complete OCI index child list, and other non-retained data.
+- Schema, semantic, and retained-evidence validation remains fail-closed. Documentation must distinguish receipt-only trust in the omitted OCI index child list from package-mode membership checks against the retained exact OCI bytes, while retaining the producer trust boundary for live observations, desired replica counts, and other non-retained data.
 - Default local receipts remain unsigned. File signing keys require explicit development/test opt-in, owner-only POSIX permissions, and documented size/format limits; production KMS/HSM is not claimed.
 - `RELEASE_PROOF_BUILD_DIGEST` remains an operator-supplied assertion, not measured or verified build provenance.
 - `gh` 2.102.0 remains the minimum for attestation verification. Do not replace exact signer matching with unsafe prefix or regular-expression checks.

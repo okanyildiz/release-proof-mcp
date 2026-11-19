@@ -198,6 +198,9 @@
         }
       }
     },
+    "evidence_package": {
+      "$ref": "#/$defs/evidencePackage"
+    },
     "tools": {
       "type": "object",
       "additionalProperties": false,
@@ -311,6 +314,19 @@
     }
   },
   "$defs": {
+    "evidencePackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_sha256"],
+      "properties": {
+        "schema_version": {
+          "const": "release-proof-evidence-package/v1"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      }
+    },
     "sha256Digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"

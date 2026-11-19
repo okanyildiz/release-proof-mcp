@@ -10,6 +10,7 @@ from typing import Any, BinaryIO, Callable
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from .evidence_package import export_evidence_package
 from .version import __version__
 from .policy import PolicyConfigurationError, PolicyStore
 from .request import INPUT_SCHEMA, ValidationError, VerificationRequest
@@ -26,6 +27,7 @@ MAX_MESSAGE_BYTES = 1024 * 1024
 MAX_RECEIPT_BYTES = 512 * 1024
 WORKER_SHUTDOWN_SECONDS = 130.0
 MAX_CONCURRENT_CALLS = 4
+EVIDENCE_PACKAGE_ROOT_ENVIRONMENT = "RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT"
 
 RECEIPT_PROOF_GUIDANCE = (
     "The receipt document itself is not a cryptographic signature. `proof` exists only when "
@@ -58,6 +60,7 @@ class MCPServer:
         signer: Ed25519PrivateKey | ReceiptSigner | None = None,
         signing_issuer: str | None = None,
         signing_keyid: str | None = None,
+        evidence_package_root: str | os.PathLike[str] | None = None,
     ) -> None:
         if (
             not isinstance(max_concurrent_calls, int)
@@ -70,6 +73,25 @@ class MCPServer:
         )
         if signing is None:
             signing = _environment_signing_configuration()
+        package_root = (
+            evidence_package_root
+            if evidence_package_root is not None
+            else os.environ.get(EVIDENCE_PACKAGE_ROOT_ENVIRONMENT)
+        )
+        if package_root is not None:
+            try:
+                package_root = os.fspath(package_root)
+            except TypeError as error:
+                raise ValueError("evidence_package_root must be a filesystem path") from error
+            if (
+                not isinstance(package_root, str)
+                or not package_root
+                or "\x00" in package_root
+            ):
+                raise ValueError("evidence_package_root must be a nonempty filesystem path")
+            if signing is None:
+                raise ValueError("Evidence package export requires a signing backend")
+        self._evidence_package_root = package_root
         self._signing = signing
         self.verifier_factory = (
             self._default_verifier if verifier_factory is None else verifier_factory
@@ -177,21 +199,52 @@ class MCPServer:
                         if progress_token is not None
                         else None
                     )
-                    report = self.verifier_factory().verify(
-                        request,
-                        policy,
-                        cancel_event=cancel_event,
-                        progress=progress,
-                    )
-                    if self._signing is not None:
-                        signer, signing_issuer, signing_keyid = self._signing
-                        report = sign_receipt(
-                            report,
-                            signer,
-                            signing_issuer,
-                            signing_keyid,
+                    verifier = self.verifier_factory()
+                    if self._evidence_package_root is not None:
+                        receipt, artifacts = verifier.verify_detailed(
+                            request,
+                            policy,
                             cancel_event=cancel_event,
+                            progress=progress,
                         )
+                        if self._signing is None:
+                            raise ValueError("Evidence package export requires signing")
+                        signer, signing_issuer, signing_keyid = self._signing
+                        if receipt["status"] == "verified" and not receipt["evidence_truncation"]:
+                            report = export_evidence_package(
+                                receipt,
+                                artifacts,
+                                signer,
+                                signing_issuer,
+                                signing_keyid,
+                                self._evidence_package_root,
+                                cancel_event=cancel_event,
+                                max_receipt_bytes=MAX_RECEIPT_BYTES,
+                            )
+                        else:
+                            report = sign_receipt(
+                                receipt,
+                                signer,
+                                signing_issuer,
+                                signing_keyid,
+                                cancel_event=cancel_event,
+                            )
+                    else:
+                        report = verifier.verify(
+                            request,
+                            policy,
+                            cancel_event=cancel_event,
+                            progress=progress,
+                        )
+                        if self._signing is not None:
+                            signer, signing_issuer, signing_keyid = self._signing
+                            report = sign_receipt(
+                                report,
+                                signer,
+                                signing_issuer,
+                                signing_keyid,
+                                cancel_event=cancel_event,
+                            )
                     encoded = json.dumps(
                         report, sort_keys=True, separators=(",", ":"), allow_nan=False
                     )

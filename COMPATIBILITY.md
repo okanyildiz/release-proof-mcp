@@ -6,6 +6,7 @@
 - MCP protocol: `2025-06-18`, versioned independently of the package and evidence contracts.
 - Policy: `release-proof-policy/v1`, versioned independently.
 - Receipt: `release-deployment-proof/v2`, implemented and emitted. Unsigned local receipts are the default; configured MCP signing adds an in-toto Statement and DSSE Ed25519 proof. The [v2 JSON Schema](src/release_proof_mcp/schemas/receipt-v2.json) defines the concrete shape, and the [sanitized golden receipt](tests/fixtures/receipt-v2.golden.json) illustrates it.
+- Evidence package manifest: `release-proof-evidence-package/v1`, versioned independently. Its optional v2 receipt descriptor is additive; ordinary v2 receipts are unchanged. A descriptor-bearing receipt requires the exact five-file package during consumer verification.
 
 ## Receipt v2 breaking changes
 
@@ -19,11 +20,11 @@ Consumers must provide exact full-subject and full-verifier objects with no miss
 
 ## Version policy
 
-Package, MCP, policy, and receipt versions move independently. Adding required receipt fields, removing or renaming fields, or changing field/proof semantics is breaking and requires a new receipt contract version. Consumers must not reinterpret an unknown receipt version as a supported one.
+Package, MCP, policy, receipt, and evidence-package manifest versions move independently. Adding required receipt fields, removing or renaming fields, or changing field/proof semantics is breaking and requires a new receipt contract version. Consumers must not reinterpret an unknown receipt or package version as a supported one.
 
 The consumer's freshness contract combines nonce equality with consumer-side time and maximum-age checks. It has no one-time replay cache. Failed and unknown receipts may use the same signed audit format but are always denied by the gate.
 
-`release-proof-verify` returns 0 for allow, 1 for deny, and 2 for input/usage errors. Receipt, expectation, and public-key inputs are each limited to 2 MiB; strict JSON rejects duplicate keys and nonfinite numbers. These behaviors are part of the consumer interface.
+`release-proof-verify` returns 0 for allow, 1 for deny, and 2 for input/usage errors. Receipt, expectation, and public-key inputs are each limited to 2 MiB; strict JSON rejects duplicate keys, nonfinite numbers, and excessive nesting. Packages use the documented per-file and total bounds and exact five-file set. These behaviors are part of the consumer interface.
 
 ## Reason codes
 
@@ -37,4 +38,4 @@ The exact `cryptography==50.0.2` and `jsonschema==4.26.0` pins are interim until
 
 ## Provider and enterprise status
 
-A single-operator live fixture is recorded in `docs/live-validation-2026-11-18.md`: reviewed PR evidence, approved initial Actions run, GHCR, kind/Kubernetes, OpenBao Transit signing, and independent consumer allow/deny. This is not a provider/runtime matrix, independent organizational adoption, production key custody, or broad enterprise-readiness claim. Evidence-package distribution, authenticated isolated remote cells, nonblocking output, and high availability remain separate unimplemented work; production TLS, HSM/key custody, audit, sealing, and managed-cloud KMS remain unvalidated.
+A single-operator live fixture is recorded in `docs/live-validation-2026-11-18.md`: reviewed PR evidence, approved initial Actions run, GHCR, kind/Kubernetes, OpenBao Transit signing, and independent consumer allow/deny. This is not a provider/runtime matrix, independent organizational adoption, production key custody, or broad enterprise-readiness claim. Local signed evidence-package export and offline verification are implemented; remote package distribution, authenticated isolated remote cells, nonblocking output, and high availability remain separate unimplemented work. Production TLS, HSM/key custody, audit, sealing, and managed-cloud KMS remain unvalidated.

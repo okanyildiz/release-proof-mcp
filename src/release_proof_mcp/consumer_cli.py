@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import stat
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -12,7 +13,12 @@ from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-from .consumer import read_bounded_file, load_strict_json_file, verify_receipt
+from .consumer import (
+    read_bounded_file,
+    load_strict_json_file,
+    verify_evidence_package,
+    verify_receipt,
+)
 
 
 class _UsageError(Exception):
@@ -33,24 +39,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _print_input_error("USAGE_ERROR")
 
     try:
+        input_mode = Path(args.receipt).lstat().st_mode
+        package_input = stat.S_ISDIR(input_mode)
+        if not package_input and not stat.S_ISREG(input_mode):
+            raise ValueError("Consumer input must be a receipt file or package directory.")
         public_key = _load_public_key(args.trusted_public_key)
-        receipt = load_strict_json_file(args.receipt)
+        receipt = (
+            None if package_input else load_strict_json_file(args.receipt)
+        )
         expectation_value = load_strict_json_file(args.expectations)
         expected_subject, expected_verifier = _expectations(expectation_value)
     except (OSError, ValueError, TypeError, UnsupportedAlgorithm):
         return _print_input_error("INPUT_ERROR")
 
-    decision = verify_receipt(
-        receipt,
-        {args.keyid: public_key},
-        expected_issuer=args.issuer,
-        expected_subject=expected_subject,
-        expected_policy_hash=args.policy_hash,
-        expected_verifier=expected_verifier,
-        expected_nonce=args.nonce,
-        now=datetime.now(timezone.utc),
-        max_age_seconds=args.max_age,
-    )
+    options = {
+        "trusted_public_keys": {args.keyid: public_key},
+        "expected_issuer": args.issuer,
+        "expected_subject": expected_subject,
+        "expected_policy_hash": args.policy_hash,
+        "expected_verifier": expected_verifier,
+        "expected_nonce": args.nonce,
+        "now": datetime.now(timezone.utc),
+        "max_age_seconds": args.max_age,
+    }
+    if package_input:
+        decision = verify_evidence_package(args.receipt, **options)
+    else:
+        decision = verify_receipt(receipt, **options)
     print(
         json.dumps(
             decision,
@@ -94,11 +109,11 @@ def _nonnegative_int(value: str) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
         description=(
-            "Verify one signed release receipt with an explicitly loaded Ed25519 PEM public key. "
-            "Receipt and expectation JSON files are limited to 2 MiB."
+            "Verify one signed receipt or five-file evidence package with an explicitly loaded "
+            "Ed25519 PEM public key. Receipt and expectation JSON files are limited to 2 MiB."
         )
     )
-    parser.add_argument("receipt", help="signed receipt JSON path")
+    parser.add_argument("receipt", help="signed receipt JSON or evidence package directory")
     parser.add_argument(
         "--trusted-public-key",
         "--public-key",

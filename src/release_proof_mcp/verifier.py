@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Sequence
 
@@ -50,6 +51,12 @@ MANIFEST_MEDIA_TYPES = frozenset(
         "application/vnd.docker.distribution.manifest.v2+json",
     }
 )
+
+
+@dataclass
+class VerificationArtifacts:
+    sigstore_bundle: bytes | None = None
+    oci_manifest: bytes | None = None
 
 
 class EvidenceError(RuntimeError):
@@ -101,6 +108,22 @@ class ReleaseVerifier:
         cancel_event: threading.Event | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
+        receipt, _artifacts = self.verify_detailed(
+            request,
+            policy,
+            cancel_event=cancel_event,
+            progress=progress,
+        )
+        return receipt
+
+    def verify_detailed(
+        self,
+        request: VerificationRequest,
+        policy: TrustedPolicy,
+        *,
+        cancel_event: threading.Event | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> tuple[dict[str, Any], VerificationArtifacts]:
         started_at = self._now()
         report = ReportBuilder(
             request,
@@ -109,6 +132,7 @@ class ReleaseVerifier:
             verifier_instance_id=self.verifier_instance_id,
             build_digest=self.build_digest,
         )
+        artifacts = VerificationArtifacts()
         self._deadline = self.monotonic() + self.deadline_seconds
         self._cancel_event = cancel_event
         self._progress = progress
@@ -120,8 +144,12 @@ class ReleaseVerifier:
             first_snapshot = self._first_runtime_snapshot(request, report)
             self._emit_progress("registry.resolution")
             registry = self._resolve_registry(request, report)
+            if registry is not None:
+                artifacts.oci_manifest = registry["manifest_bytes"]
             self._emit_progress("attestation.verification")
-            attestation = self._verify_attestation(request, report, registry, gh_version_reason, policy)
+            attestation = self._verify_attestation(
+                request, report, registry, gh_version_reason, policy, artifacts
+            )
             self._verify_run_and_release(request, report, attestation, policy)
             if policy.require_cosign_signature:
                 self._emit_progress("signature.cosign")
@@ -130,7 +158,7 @@ class ReleaseVerifier:
             self._reconcile_runtime(request, report, first_snapshot, registry)
             self._emit_progress("runtime.stable_observation")
             self._verify_stable_observation(request, report, first_snapshot)
-            return report.finalize(self._now())
+            return report.finalize(self._now()), artifacts
         finally:
             self._deadline = None
             self._cancel_event = None
@@ -380,7 +408,13 @@ class ReleaseVerifier:
                 "resolved_at": self._now(),
             }
             report.verified("registry.resolution", ("registry",))
-            return {"digest": digest, "pinned": pinned, "children": children, "manifest": manifest}
+            return {
+                "digest": digest,
+                "pinned": pinned,
+                "children": children,
+                "manifest": manifest,
+                "manifest_bytes": manifest_result.stdout,
+            }
         except (EvidenceError, UnicodeDecodeError) as error:
             if isinstance(error, EvidenceError):
                 reason = error.reason
@@ -396,6 +430,7 @@ class ReleaseVerifier:
         registry: dict[str, Any] | None,
         gh_version_reason: Reason | None,
         policy: TrustedPolicy,
+        artifacts: VerificationArtifacts,
     ) -> tuple[int, int] | None:
         if (
             request.signer_workflow != policy.signer_workflow
@@ -483,8 +518,14 @@ class ReleaseVerifier:
             )
             return None
         try:
+            def capture_bundle(raw: bytes | None) -> None:
+                artifacts.sigstore_bundle = raw
+
             certificate, attestation, run_id, attempt = select_attestation(
-                payload, request, registry["digest"]
+                payload,
+                request,
+                registry["digest"],
+                bundle_sink=capture_bundle,
             )
             report.evidence["certificate"] = certificate
             report.evidence["attestation"] = attestation

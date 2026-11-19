@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-651%20passed-14b8a6?style=for-the-badge" alt="Tests: 651 passed"></a>
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-775%20passed-14b8a6?style=for-the-badge" alt="Tests: 775 passed"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
@@ -20,6 +20,7 @@
   <a href="#what-it-does">What it does</a> |
   <a href="#verification-chain">Verification chain</a> |
   <a href="#quickstart">Quickstart</a> |
+  <a href="GUIDE.md">Full usage guide</a> |
   <a href="#portable-signed-receipts-and-independent-gate">Signed gate</a> |
   <a href="#integration">Integration</a> |
   <a href="#security-model">Security</a> |
@@ -301,8 +302,8 @@ Other honest degradations include `ATTESTATION_MISSING`, `PROVENANCE_MISSING`, `
 
 1. The consumer generates a fresh base64url `consumer_nonce` and includes it in the MCP tool call.
 2. The producer collects the observation-window evidence and creates a v2 receipt with a UUID4 `receipt_id`, full subject, verifier identity, `policy_descriptor`, effective policy, and policy hash. Local receipts remain unsigned by default.
-3. When signing is configured, the server validates the receipt and places a standard in-toto Statement, whose predicate contains the receipt and `proof_metadata`, into a DSSE envelope. It signs the DSSE pre-authentication encoding with Ed25519. The signed metadata contains `issuer`, `keyid`, `algorithm`, and `signed_at`. The server validates the signed result and never falls back to unsigned output after a signing failure.
-4. The independent consumer verifies the stored JSON offline with `release-proof-verify`. It needs neither an AI/MCP session nor GitHub, GHCR, Kubernetes, or other provider credentials.
+3. When signing is configured, the server validates the receipt and places a standard in-toto Statement, whose predicate contains the receipt and `proof_metadata`, into a DSSE envelope. It signs the DSSE pre-authentication encoding with Ed25519. The signed metadata contains `issuer`, `keyid`, `algorithm`, and `signed_at`. The server validates the signed result and never falls back to unsigned output after a signing failure. Optional package export adds the manifest descriptor before this single signing operation.
+4. The independent consumer verifies either the stored receipt JSON or a five-file evidence package offline with `release-proof-verify`. It needs neither an AI/MCP session nor GitHub, GHCR, Kubernetes, or other provider credentials.
 
 `policy_hash` is only the SHA-256 hash of the compact, key-sorted effective-policy JSON. It identifies policy content but is not a signature and does not authenticate the receipt. The DSSE proof binds the receipt and signed proof metadata to the trusted producer key. Failed and unknown receipts can be signed as audit records, but the consumer denies them.
 
@@ -336,6 +337,14 @@ export RELEASE_PROOF_SIGNING_KEY_ID=release-proof/transit/release-proof/v1
 Use `RELEASE_PROOF_OPENBAO_KUBERNETES_ROLE` instead of a static token for Kubernetes service-account authentication; `RELEASE_PROOF_OPENBAO_CA_FILE` selects an operator CA bundle when needed. The key ID must end in the pinned `/v<version>`. File and OpenBao backends, partial configuration, and ambiguous authentication are rejected. Runtime signing needs only the Transit sign path, not private-key export. Production HSM backing, TLS operations, HA, sealing, audit behavior, and managed-cloud KMS are not validated by the local OpenBao development integration.
 
 Optional `RELEASE_PROOF_VERIFIER_INSTANCE_ID` and `RELEASE_PROOF_BUILD_DIGEST` values populate `verifier.instance_id` and `verifier.build_digest`. The build digest is an operator-supplied assertion, not a measurement of the running binary or verified build provenance. Consumer verifier expectations include all four fields, including explicit null values.
+
+### Signed evidence package export
+
+Set `RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT=/secure/evidence` together with one of the existing signing configurations to publish local evidence packages through the normal MCP verification path. The root is operator configuration, not an MCP tool argument. Programmatic embedders can use `MCPServer(..., evidence_package_root=...)`, or call `ReleaseVerifier.verify_detailed()` followed by `export_evidence_package()` with the same trusted policy and signing backend. Raw artifacts returned by `verify_detailed()` are export inputs, not additional receipt fields.
+
+A successful export creates the operator-selected `root/<receipt_id>` directory with exactly five regular files: `receipt.json`, `manifest.json`, `effective-policy.json`, `sigstore-bundle.json`, and `oci-manifest.json`. There is no archive or extraction step. The manifest names only the policy, accepted Sigstore bundle, and OCI attachments with their exact sizes and hashes; it does not hash itself or the receipt. The receipt's optional `evidence_package.manifest_sha256` authenticates the canonical manifest through the existing DSSE signature. The bundle is the canonical accepted bundle whose hash matches `evidence.attestation.bundle_sha256`; the OCI file retains the exact `crane manifest` stdout bytes.
+
+Package directories are mode 0700 and files are mode 0600 on POSIX. Publication uses a staged directory and rename, refuses an existing receipt ID, and cleans up partial output after signing, write, or rename failure. Export requires signing and is available only for `verified` receipts with empty `evidence_truncation`; other results produce no evidence-package claim.
 
 ### Independent consumer command
 
@@ -383,21 +392,25 @@ release-proof-verify /secure/evidence/receipt.json \
   --max-age 300
 ```
 
+To verify an exported package, replace `/secure/evidence/receipt.json` with `/secure/evidence/<receipt_id>` and keep every expectation and trust argument unchanged. A receipt containing `evidence_package` is not sufficient by itself: standalone verification denies it with `PACKAGE_REQUIRED`.
+
 `--max-age` is a nonnegative number of seconds measured by the consumer from receipt `completed_at`. The CLI also rejects future observation/signing times and inverted observation windows. Nonce equality plus consumer-side age checking provides freshness, but there is no one-time replay cache; a caller requiring one-time use must generate and track fresh challenges itself.
 
 The command prints bounded decision JSON and uses these process exit codes:
 
-- `0`: allow; the receipt is verified and every signature, expectation, evidence, and freshness check passed.
-- `1`: deny; this includes failed/unknown audit receipts, invalid proofs, mismatched expectations, and stale evidence.
+- `0`: allow; the receipt or package is verified and every signature, expectation, evidence, attachment, and freshness check passed.
+- `1`: deny; this includes failed/unknown audit receipts, every truncated receipt (`EVIDENCE_TRUNCATED`), invalid proofs or packages, mismatched expectations, and stale evidence.
 - `2`: input or usage error. Treat every nonzero exit as denial.
 
 ### Consumer trust boundary and limits
 
-The consumer fails closed on v2 schema, semantic, and retained-evidence validation. It verifies the DSSE signature, signed metadata, exact full subject and verifier, policy hash and internal policy consistency, issuer and trusted public key, nonce, observation window, and consumer-side maximum age. It does not independently reverify GitHub, Sigstore, GHCR, or Kubernetes.
+The consumer fails closed on v2 schema, semantic, and retained-evidence validation. It verifies the DSSE signature, signed metadata, exact full subject and verifier, policy hash and internal policy consistency, issuer and trusted public key, nonce, observation window, and consumer-side maximum age. It does not independently requery GitHub, GHCR, or Kubernetes, or rerun Sigstore cryptographic verification.
 
-The consumer trusts the producer for live provider observations and for data not retained in the receipt. This includes desired replica counts and the complete OCI index child list. Retained-evidence checks cannot reconstruct omitted provider state or prove software safety, node integrity, or admission enforcement.
+Package verification additionally requires the exact five-file set and no-follow regular files, validates the signed manifest digest and receipt ID, checks exact attachment sizes/hashes, requires canonical effective-policy and Sigstore bundle JSON, binds the bundle statement predicate and named subject to the receipt, and hashes the raw OCI bytes to the signed registry digest and media type. Every Pod marked `index_child` must name a digest present in that exact OCI index. Package-supplied keys are never trusted, and raw package contents are never printed.
 
-Receipt, expectation, and trusted-public-key files are each limited to 2 MiB. Strict UTF-8 JSON parsing rejects duplicate object keys and nonfinite numbers. Denials suppress input and evidence contents rather than echoing them. The MCP server's separate 512 KiB serialized-receipt limit is enforced after optional signing.
+The consumer still trusts the producer for live provider observations and data not retained in the receipt or package, including desired replica counts. A receipt alone does not retain the complete OCI index child list. Neither input form proves software safety, node integrity, admission enforcement, or post-start filesystem state.
+
+Receipt, expectation, and trusted-public-key files are each limited to 2 MiB. Package limits are 2 MiB for the receipt, 1 MiB for policy, 64 KiB for the manifest, 8 MiB each for bundle and OCI, and 20 MiB total. Strict bounded UTF-8 JSON parsing rejects duplicate or escaped-duplicate keys, nonfinite numbers, and excessive nesting. Symlinks, FIFOs, directories in place of files, extra entries, and archive inputs are rejected. Denials suppress input and evidence contents rather than echoing them. The MCP server's separate 512 KiB serialized-receipt limit is enforced after optional signing and before package publication.
 
 ### Breaking migration from receipt v1
 
@@ -516,7 +529,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **651 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
+The current offline suite reports **775 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
 python -m pip install '.[test]'
@@ -564,10 +577,10 @@ The optional test is the reproduction path for a new dedicated environment; the 
 
 ## Known limitations
 
-- **Live evidence is limited to the recorded fixture.** The dedicated single-operator GitHub/GHCR/kind/OpenBao path succeeded, but there is no provider/runtime matrix, Cosign result, production cluster result, or independent organizational adoption evidence. The 651 passing tests are primarily deterministic/local evidence.
-- **Signed consumption does not remove producer trust.** The consumer validates retained evidence but does not requery upstream providers or reconstruct desired replica counts and the complete OCI index child list.
+- **Live evidence is limited to the recorded fixture.** The dedicated single-operator GitHub/GHCR/kind/OpenBao path succeeded, but the five-file package has not been exported and consumed in a new live run. Deterministic and clean-wheel package tests do not close that gap. There is no provider/runtime matrix, Cosign result, production cluster result, or independent organizational adoption evidence.
+- **Signed consumption does not remove producer trust.** The consumer validates retained evidence but does not requery upstream providers or reconstruct desired replica counts. A receipt alone does not retain the complete OCI index child list; a package binds the exact index bytes but still relies on the producer's accepted live observations.
 - **Freshness is not one-time replay prevention.** Nonce and age checks require caller-side challenge discipline; the consumer has no replay cache.
-- **Production key operations and evidence distribution remain open.** The OpenBao adapter and real development integration work, but production TLS, HSM backing, HA, sealing, audit operations, managed-cloud KMS, and evidence-package distribution are not implemented or validated.
+- **Production key operations and remote evidence distribution remain open.** The OpenBao adapter, local package export, and real development integration work, but production TLS, HSM backing, HA, sealing, audit operations, managed-cloud KMS, and authenticated remote package distribution are not implemented or validated.
 - **Windows process-tree cleanup needs platform validation.** The runner has a separate Windows `CREATE_NEW_PROCESS_GROUP` and `taskkill /T /F` path. The local process-tree tests exercise real subprocesses, but this macOS run does not establish Windows behavior.
 - **Approvals are not attempt-bound.** GitHub's approval history is run-level. Only certified run attempt 1 is supported, and the current run attempt must still be 1 when approval is evaluated; reruns fail with `RUN_ATTEMPT_UNSUPPORTED` rather than inheriting an approval.
 - **Stdout backpressure can impede responsiveness.** Writes and flushes block while `_write_lock` is held, so a stalled client pipe can delay other output. Cancellation is cooperative. Use `serve()` for supported stdio concurrency; direct concurrent in-process `handle()` calls are not a supported substitute.
@@ -580,12 +593,13 @@ Use digest-pinned deployments, isolated builders, admission enforcement, vulnera
 
 ## Roadmap
 
-The v2 receipt, DSSE Ed25519 signing, and independent consumer foundation is implemented. This is not an enterprise-readiness claim: live, adoption, and operational gates remain. Remaining investigation and implementation goals have no dated promises:
+The v2 receipt, DSSE Ed25519 signing, local evidence packages, and independent consumer foundation are implemented. This is not an enterprise-readiness claim: live, adoption, and operational gates remain. Remaining investigation and implementation goals have no dated promises:
 
 - [x] Complete a recorded single-operator vertical slice across GitHub, GHCR, kind, OpenBao signing, and independent consumer denial/allowance.
 - [x] Implement version-pinned OpenBao Transit signing with public-key self-verification and validate the real development API path.
+- [x] Define a signed five-file evidence package with local atomic export and independent offline package verification.
 - [ ] Expand the provider/client matrix and validate production TLS, HSM/key custody, rotation, audit, HA, and managed-cloud KMS operations.
-- [ ] Define and distribute an evidence package that closes documented retained-evidence gaps.
+- [ ] Add authenticated remote evidence-package distribution.
 - [ ] Add authenticated, isolated remote execution cells.
 - [ ] Implement nonblocking stdio output and high availability, and validate Windows process cleanup.
 - [ ] Add providers only when equivalent source identity, signed provenance, immutable digest, and runtime evidence can be preserved.

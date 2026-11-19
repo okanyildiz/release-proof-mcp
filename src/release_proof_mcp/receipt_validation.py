@@ -168,6 +168,14 @@ def _validate_semantics(receipt: dict[str, Any]) -> None:
             raise ReceiptValidationError("Verified receipt requires a pinned GHCR sha256 artifact.")
         _validate_verified_evidence(receipt)
 
+    _validate_truncation(receipt)
+    if "evidence_package" in receipt and (
+        receipt["status"] != "verified" or receipt["evidence_truncation"]
+    ):
+        raise ReceiptValidationError(
+            "Evidence packages require verified, complete, non-truncated evidence."
+        )
+
     if "proof" in receipt:
         proof = receipt["proof"]
         metadata = receipt["proof_metadata"]
@@ -177,6 +185,17 @@ def _validate_semantics(receipt: dict[str, Any]) -> None:
         if proof["envelope"]["signatures"][0]["keyid"] != proof["keyid"]:
             raise ReceiptValidationError("DSSE signature key ID differs from proof key ID.")
         parse_rfc3339(proof["signed_at"])
+
+
+def _validate_truncation(receipt: dict[str, Any]) -> None:
+    for name, truncation in receipt["evidence_truncation"].items():
+        values = receipt["evidence"][name]
+        if (
+            truncation["retained"] != 100
+            or truncation["retained"] != len(values)
+            or truncation["omitted"] < 1
+        ):
+            raise ReceiptValidationError("Evidence truncation metadata is inconsistent.")
 
 
 _VERIFIED_EVIDENCE_REFERENCES = {
