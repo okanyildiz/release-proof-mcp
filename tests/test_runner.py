@@ -306,7 +306,7 @@ def test_real_process_missing_tool_maps_to_tool_unavailable() -> None:
 
 
 def test_all_tool_version_stdout_is_redacted_with_real_process_runner(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     github_token = "github_pat_" + "d" * 30
     payload = (
@@ -333,10 +333,22 @@ def test_all_tool_version_stdout_is_redacted_with_real_process_runner(
             executable = bin_dir / name
             executable.write_text(f"#!{sys.executable}\n{body}\n")
             executable.chmod(0o700)
+    if os.name == "nt":
+        real_popen = subprocess.Popen
+
+        def resolve_fixture_tool(args, **kwargs):
+            command, *arguments = args
+            if command in scripts:
+                command = str(bin_dir / f"{command}.bat")
+            return real_popen([command, *arguments], **kwargs)
+
+        monkeypatch.setattr(subprocess, "Popen", resolve_fixture_tool)
     runner = ProcessRunner(
         environment={"PATH": str(bin_dir), "GH_TOKEN": "env-secret"},
         timeout_seconds=2,
     )
+    gh_result = runner.run(["gh", "--version"])
+    assert gh_result.stdout.startswith(b"development"), gh_result.stderr
     request = VerificationRequest.from_dict(base_input())
     policy_value = base_policy()
     policy_value["require_cosign_signature"] = True
