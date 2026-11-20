@@ -5,7 +5,7 @@
 ### Added
 
 - Add a code of conduct, issue templates for bugs/evidence mismatches/live results, and a security-focused pull request template.
-- Record real fixture evidence that same-repository non-reusable signers use the source commit as `buildSignerDigest`; same-repository examples now use `signer_digest: null`.
+- Record real fixture evidence that same-repository non-reusable signers use the source commit as `buildSignerDigest`. The same-repository trusted-policy example uses `signer_digest: null`, while caller JSON examples omit the field.
 
 ### Fixed
 

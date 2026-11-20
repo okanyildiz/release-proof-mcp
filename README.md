@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-777%20passed-14b8a6?style=for-the-badge" alt="Tests: 777 passed"></a>
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-778%20passed-14b8a6?style=for-the-badge" alt="Tests: 778 passed"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
@@ -529,7 +529,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **777 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
+The current offline suite reports **778 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
 python -m pip install '.[test]'
@@ -573,7 +573,7 @@ Run this only against a dedicated repository, GHCR image, and test cluster after
 export RELEASE_PROOF_LIVE_SMOKE=1
 export RELEASE_PROOF_POLICY_FILE=/secure/config/release-policy.json
 export RELEASE_PROOF_POLICY_PROFILE=production
-export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","signer_digest":null,"kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
+export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
 python -m pytest -q -m live tests/test_live_smoke.py
 ```
 
