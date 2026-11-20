@@ -798,6 +798,10 @@ class ReleaseVerifier:
         except (EvidenceError, RuntimeEvidenceError) as error:
             report.unknown("runtime.stable_observation", error.reason, ("pods",))
             return
+        first_reason = first.observation_reason()
+        if first_reason is not None:
+            report.unknown("runtime.stable_observation", first_reason, ("pods",))
+            return
         if first.stability_fingerprint() != second.stability_fingerprint():
             report.unknown(
                 "runtime.stable_observation",
@@ -808,7 +812,7 @@ class ReleaseVerifier:
                 ("pods",),
             )
             return
-        reason = first.observation_reason() or second.observation_reason()
+        reason = second.observation_reason()
         if reason:
             report.unknown("runtime.stable_observation", reason, ("pods",))
         else:
