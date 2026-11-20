@@ -28,7 +28,7 @@ The consumer's freshness contract combines nonce equality with consumer-side tim
 
 ## Reason codes
 
-Adding a reason code is additive and may occur within an existing policy or receipt contract version. Removing or renaming a code, or changing its meaning, is breaking and requires a new contract version. Consumers must handle unrecognized codes without treating them as success.
+Adding a reason code is additive and may occur within an existing policy or receipt contract version. `REPOSITORY_NOT_VISIBLE` is additive unknown coverage: a repository visibility probe failed or did not match the requested repository under the documented case-insensitive repository-name comparison, so later absence cannot be conclusive. Probe failures preserve their actual reason across dependent checks. Removing or renaming a code, or changing its meaning, is breaking and requires a new contract version. Consumers must handle unrecognized codes without treating them as success.
 
 ## Python and dependencies
 

@@ -20,6 +20,7 @@
 - Verify the complete Linux, macOS, and Windows matrix on Python 3.11 through 3.13 in hosted CI, including real Windows descendant termination after normal parent exit and startup-failure cleanup without payload execution.
 - Isolate capture tests from ambient signing configuration, prohibit infrastructure access in the demo isolation test, and verify that package-signing failures expose no secret-bearing error text or partial package.
 - Exclude owned terminal Pods in `Failed` or `Succeeded` phase from active rollout, digest reconciliation, and stability fingerprints while recording `evidence.excluded_terminal_pods`. Running-to-terminal transitions still produce `RUNTIME_CHANGED_DURING_VERIFICATION`.
+- Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code. Probe failures preserve their actual reason across source, attestation, workflow, and approval checks and skip attestation retrieval. Repository names are compared case-insensitively, and Cosign uses the same denial/rate-limit/service-error mapping. Exact plain `gh: HTTP NNN` lines are classified by status without matching substrings in SHAs or V12 identifiers.
 
 ## 0.1.1 - 2026-11-20
 
