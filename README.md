@@ -51,9 +51,9 @@ This is alpha software with a narrow supported topology: GitHub.com, Actions, GH
 
 Current validation includes:
 
-- 852 deterministic tests passed locally on macOS with three skips. Windows CI reports 850 passed with five platform- or capability-specific skips on each Python version; two skips on each host are opt-in live tests.
+- 861 deterministic tests passed locally on macOS with three skips. Windows CI includes additional platform- or capability-specific skips; two skips on each host are opt-in live tests.
 - Real single-operator live runs covering GitHub, GHCR, kind, OpenBao Transit, a signed standalone receipt, and a five-file package with independent offline allow/deny behavior.
-- The [nine-job GitHub Actions CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44826580898) passed on Linux, macOS, and Windows with Python 3.11, 3.12, and 3.13.
+- [GitHub Actions CI](https://github.com/okanyildiz/release-proof-mcp/actions/workflows/ci.yml) runs the Linux, macOS, and Windows matrix on Python 3.11, 3.12, and 3.13. The current result must pass before release.
 - `v0.1.0` and `v0.1.1` artifacts were built locally and are unattested. `v0.1.2` is prepared for workflow-built, attested artifacts, but no such release is claimed here.
 
 These runs do not establish independent organizational adoption, production key custody, production TLS/HA, Cosign interoperability, or a managed-Kubernetes/provider matrix.
