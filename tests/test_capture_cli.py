@@ -187,3 +187,27 @@ def test_signing_failure_never_returns_unsigned_receipt(
     assert status == 2
     assert stdout == ""
     assert "no receipt was emitted" in stderr
+
+
+def test_empty_package_root_is_rejected_before_verification(
+    tmp_path: Path, harness: Harness, monkeypatch, capsys
+) -> None:
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps(harness.request), encoding="utf-8")
+    monkeypatch.setenv("RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT", "")
+    calls = []
+
+    def fail_if_called(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("capture must not be called")
+
+    monkeypatch.setattr(cli_module, "capture_release", fail_if_called)
+    original_mode = tmp_path.stat().st_mode & 0o777
+
+    status = cli_module.main(["capture", "--request", str(request)])
+    captured = capsys.readouterr()
+
+    assert status == 2
+    assert captured.out == ""
+    assert calls == []
+    assert tmp_path.stat().st_mode & 0o777 == original_mode

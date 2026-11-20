@@ -15,6 +15,7 @@ from .capture import (
     ReceiptSizeError,
     capture_release,
     load_policy_store,
+    normalize_evidence_package_root,
     verifier_from_environment,
 )
 from .version import __version__
@@ -74,29 +75,18 @@ class MCPServer:
             or max_concurrent_calls < 1
         ):
             raise ValueError("max_concurrent_calls must be a positive integer")
+        package_root = normalize_evidence_package_root(
+            evidence_package_root
+            if evidence_package_root is not None
+            else os.environ.get(EVIDENCE_PACKAGE_ROOT_ENVIRONMENT)
+        )
         signing = _injected_signing_configuration(
             signer, signing_issuer, signing_keyid
         )
         if signing is None:
             signing = _environment_signing_configuration()
-        package_root = (
-            evidence_package_root
-            if evidence_package_root is not None
-            else os.environ.get(EVIDENCE_PACKAGE_ROOT_ENVIRONMENT)
-        )
-        if package_root is not None:
-            try:
-                package_root = os.fspath(package_root)
-            except TypeError as error:
-                raise ValueError("evidence_package_root must be a filesystem path") from error
-            if (
-                not isinstance(package_root, str)
-                or not package_root
-                or "\x00" in package_root
-            ):
-                raise ValueError("evidence_package_root must be a nonempty filesystem path")
-            if signing is None:
-                raise ValueError("Evidence package export requires a signing backend")
+        if package_root is not None and signing is None:
+            raise ValueError("Evidence package export requires a signing backend")
         self._evidence_package_root = package_root
         self._signing = signing
         self.verifier_factory = (

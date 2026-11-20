@@ -12,6 +12,7 @@ from .capture import (
     SigningConfiguration,
     capture_release,
     load_policy_store,
+    normalize_evidence_package_root,
     verifier_from_environment,
 )
 from .consumer import load_strict_json_file, read_bounded_file
@@ -112,6 +113,9 @@ def _run_capture(
         raise ValueError("Capture request must be a JSON object")
     if args.nonce_file:
         arguments["consumer_nonce"] = _read_nonce(args.nonce_file)
+    package_root = normalize_evidence_package_root(
+        os.environ.get("RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT")
+    )
     policies = policy_store or load_policy_store()
     verifier = (
         verifier_from_environment()
@@ -126,7 +130,7 @@ def _run_capture(
         signing=(
             _environment_signing_configuration() if signing is None else signing
         ),
-        evidence_package_root=os.environ.get("RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT"),
+        evidence_package_root=package_root,
         max_receipt_bytes=MAX_RECEIPT_BYTES,
         receipt_signer=receipt_signer,
     )

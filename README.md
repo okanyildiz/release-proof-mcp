@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-789%20passed-14b8a6?style=for-the-badge" alt="Tests: 789 passed"></a>
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-792%20passed-14b8a6?style=for-the-badge" alt="Tests: 792 passed"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
@@ -431,7 +431,7 @@ The command prints bounded decision JSON and uses these process exit codes:
 
 The consumer fails closed on v2 schema, semantic, and retained-evidence validation. It verifies the DSSE signature, signed metadata, exact full subject and verifier, policy hash and internal policy consistency, issuer and trusted public key, nonce, observation window, and consumer-side maximum age. It does not independently requery GitHub, GHCR, or Kubernetes, or rerun Sigstore cryptographic verification.
 
-Package verification additionally requires the exact five-file set and no-follow regular files, validates the signed manifest digest and receipt ID, checks exact attachment sizes/hashes, requires canonical effective-policy and Sigstore bundle JSON, binds the bundle statement predicate and named subject to the receipt, and hashes the raw OCI bytes to the signed registry digest and media type. Every Pod marked `index_child` must name a digest present in that exact OCI index. Package-supplied keys are never trusted, and raw package contents are never printed.
+Package verification additionally requires the exact five-file set and platform-appropriate no-follow/path identity checks, validates the signed manifest digest and receipt ID, checks exact attachment sizes/hashes, requires canonical effective-policy and Sigstore bundle JSON, binds the bundle statement predicate and named subject to the receipt, and hashes the raw OCI bytes to the signed registry digest and media type. POSIX uses no-follow directory descriptors; Windows uses `lstat` and `st_dev`/`st_ino` identity revalidation. Every Pod marked `index_child` must name a digest present in that exact OCI index. Package-supplied keys are never trusted, and raw package contents are never printed.
 
 The consumer still trusts the producer for live provider observations and data not retained in the receipt or package, including desired replica counts. A receipt alone does not retain the complete OCI index child list. Neither input form proves software safety, node integrity, admission enforcement, or post-start filesystem state.
 
@@ -554,7 +554,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **789 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
+The current offline suite reports **792 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
 python -m pip install '.[test]'

@@ -44,6 +44,20 @@ def load_policy_store(policy_file: str | None = None) -> PolicyStore:
     return PolicyStore.from_file(path)
 
 
+def normalize_evidence_package_root(
+    value: str | os.PathLike[str] | None,
+) -> str | None:
+    if value is None:
+        return None
+    try:
+        path = os.fspath(value)
+    except TypeError as error:
+        raise ValueError("evidence_package_root must be a filesystem path") from error
+    if not isinstance(path, str) or not path or "\x00" in path:
+        raise ValueError("evidence_package_root must be a nonempty filesystem path")
+    return path
+
+
 def capture_release(
     arguments: Any,
     *,
@@ -57,6 +71,7 @@ def capture_release(
     max_receipt_bytes: int = MAX_RECEIPT_BYTES,
     receipt_signer: Callable[..., dict[str, Any]] = sign_receipt,
 ) -> CaptureResult:
+    evidence_package_root = normalize_evidence_package_root(evidence_package_root)
     if evidence_package_root is not None and signing is None:
         raise ValueError("Evidence package export requires a signing backend")
     policy = policy_store.select(active_profile)
