@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible correctness or safety problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include tokens, private keys, kubeconfig data, approval comments, or sensitive production evidence. For suspected vulnerabilities, use private vulnerability reporting instead of a public issue.
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Give exact commands, input shapes, and relevant version or commit.
+      placeholder: Steps, command, expected behavior, and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and reason codes
+      description: Include sanitized reason codes and hashes when useful, not raw secrets or production evidence.
+    validations:
+      required: false
+  - type: dropdown
+    id: verification-level
+    attributes:
+      label: How was this reproduced?
+      options:
+        - Fixtures only
+        - Recorded real output
+        - Live environment
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Python, OS, package version, gh, crane, kubectl, and signing backend when relevant.
+    validations:
+      required: false

@@ -598,7 +598,7 @@ Run this only against a dedicated repository, GHCR image, and test cluster after
 export RELEASE_PROOF_LIVE_SMOKE=1
 export RELEASE_PROOF_POLICY_FILE=/secure/config/release-policy.json
 export RELEASE_PROOF_POLICY_PROFILE=production
-export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","signer_digest":null,"kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
+export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
 python -m pytest -q -m live tests/test_live_smoke.py
 ```
 

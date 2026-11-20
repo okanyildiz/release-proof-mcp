@@ -191,6 +191,17 @@ def test_one_acceptable_attestation_is_sufficient(harness: Harness) -> None:
     assert report["evidence"]["attestation"]["subject_digest"] == DIGEST
 
 
+def test_bundle_tlog_entries_are_used_when_legacy_field_is_absent(harness: Harness) -> None:
+    result = attestation_result()
+    del result["verificationResult"]["transparencyLogEntries"]
+    harness.set_attestation([result])
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"
+    assert report["evidence"]["attestation"]["transparency_log_ids"] == ["9876"]
+
+
 def test_verifier_argv_uses_digest_never_tag_and_all_policy_flags(harness: Harness) -> None:
     report = harness.verify()
 

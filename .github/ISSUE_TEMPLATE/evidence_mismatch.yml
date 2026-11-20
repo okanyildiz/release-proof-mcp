@@ -1,0 +1,37 @@
+name: Evidence mismatch
+description: Report a receipt, attestation, policy, registry, or runtime evidence mismatch
+title: "[Evidence]: "
+labels: [evidence]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provide only sanitized evidence. Do not attach raw custom predicates, credentials, kubeconfig data, or sensitive production packages.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected evidence relationship
+      description: Which commit, review, run, artifact, digest, or runtime identity should match?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Observed evidence and reason code
+      description: What differed? Include the check name, verdict, and stable reason code.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and evidence level
+      description: Explain whether this used fixtures, recorded real output, or a live environment.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, approval comments, kubeconfig data, and sensitive production evidence.
+          required: true

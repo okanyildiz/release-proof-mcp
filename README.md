@@ -102,6 +102,6 @@ Earlier unattested releases support checksum verification only. No PyPI publicat
 - [Compatibility contracts](COMPATIBILITY.md) for policy, receipt, package, protocol, and exit-code semantics.
 - [Security policy](SECURITY.md) for trust boundaries and private vulnerability reporting.
 - Live evidence: [2026-11-18](docs/live-validation-2026-11-18.md) and [2026-11-20](docs/live-validation-2026-11-20.md), including their limits.
-- [Contributing](CONTRIBUTING.md) and [code of conduct](https://github.com/okanyildiz/release-proof-mcp/blob/task/prepublication-docs/CODE_OF_CONDUCT.md).
+- [Contributing](CONTRIBUTING.md) and [code of conduct](CODE_OF_CONDUCT.md).
 
 Issues are the current support path. Do not disclose suspected vulnerabilities in a public issue and do not attach live tokens, kubeconfig data, registry credentials, approval comments, or sensitive production evidence.

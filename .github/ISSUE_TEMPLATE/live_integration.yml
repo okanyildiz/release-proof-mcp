@@ -1,0 +1,44 @@
+name: Live integration result
+description: Share a dedicated live-provider validation result
+title: "[Live]: "
+labels: [live-validation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use only a dedicated non-production fixture. Never include tokens, private keys, kubeconfig contents, approval comments, or sensitive production evidence.
+  - type: textarea
+    id: topology
+    attributes:
+      label: Topology
+      description: Source provider, registry, workflow type, Kubernetes distribution/runtime, signing backend, and whether the run was attempt 1.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result and reason codes
+      description: Include verified, failed, or unknown and the exact reason codes. Explain any package export and offline consumer result separately.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and immutable identities
+      description: Package, Python, OS, gh, crane, kubectl, OpenBao/Cosign versions and public commit/run/digest values when safe to share.
+    validations:
+      required: false
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Limits and remaining questions
+      description: Record single-operator status, skipped scenarios, unavailable evidence, and anything not independently checked.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: This report contains no live credentials or sensitive production evidence.
+          required: true
