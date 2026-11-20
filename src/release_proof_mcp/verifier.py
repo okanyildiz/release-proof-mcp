@@ -274,6 +274,8 @@ class ReleaseVerifier:
         try:
             snapshot = self._fetch_runtime_snapshot(request)
             report.evidence["pods"] = [pod.evidence() for pod in snapshot.pods]
+            if snapshot.excluded_terminal_pods:
+                report.evidence["excluded_terminal_pods"] = snapshot.excluded_terminal_pods
             reason = snapshot.rollout_reason()
             if reason:
                 report.unknown("runtime.rollout", reason, ("pods",))
@@ -796,10 +798,6 @@ class ReleaseVerifier:
         except (EvidenceError, RuntimeEvidenceError) as error:
             report.unknown("runtime.stable_observation", error.reason, ("pods",))
             return
-        reason = first.observation_reason() or second.observation_reason()
-        if reason:
-            report.unknown("runtime.stable_observation", reason, ("pods",))
-            return
         if first.stability_fingerprint() != second.stability_fingerprint():
             report.unknown(
                 "runtime.stable_observation",
@@ -809,6 +807,10 @@ class ReleaseVerifier:
                 ),
                 ("pods",),
             )
+            return
+        reason = first.observation_reason() or second.observation_reason()
+        if reason:
+            report.unknown("runtime.stable_observation", reason, ("pods",))
         else:
             report.verified("runtime.stable_observation", ("pods",))
 
