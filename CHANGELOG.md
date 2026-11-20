@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.2 - Unreleased
+
+### Added
+
+- Generate and verify `SHA256SUMS.txt` in the release workflow and document `gh attestation verify` for workflow-produced release artifacts.
+
+### Changed
+
+- Replace the banner tagline with "From reviewed commit to verifiable deployment evidence."
+
+### Fixed
+
+- Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX platforms while preserving no-overwrite package publication. Use platform-native access controls elsewhere.
+- Close Windows subprocess stream objects during forced cleanup and fall back to `process.kill()` when `taskkill` fails.
+- Make tool-version, line-ending, and POSIX permission tests platform-aware.
+
+### Release evidence notes
+
+- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their checksum files provide integrity checks, not GitHub build-provenance attestations. The first workflow-built public release is planned for `0.1.2`.
+
 ## 0.1.1 - 2026-11-20
 
 ### Added

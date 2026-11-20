@@ -23,6 +23,11 @@ jobs:
         run: |
           python -m pip install build==1.6.1
           python -m build --sdist --wheel .
+      - name: Generate and verify SHA-256 checksums
+        working-directory: dist
+        run: |
+          sha256sum release_proof_mcp-*.tar.gz release_proof_mcp-*-py3-none-any.whl > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
       - name: Check the tag against the package version
         run: python -c "import os, sys; sys.path.insert(0, 'src'); from release_proof_mcp.version import __version__; assert os.environ['GITHUB_REF_NAME'] == 'v' + __version__, (__version__, os.environ['GITHUB_REF_NAME'])"
       - name: Attest distribution build provenance
