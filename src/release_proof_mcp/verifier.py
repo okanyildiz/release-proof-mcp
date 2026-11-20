@@ -99,6 +99,7 @@ class ReleaseVerifier:
         self._deadline: float | None = None
         self._cancel_event: threading.Event | None = None
         self._progress: Callable[[str], None] | None = None
+        self._repository_visible: bool | None = None
 
     def verify(
         self,
@@ -133,6 +134,7 @@ class ReleaseVerifier:
             build_digest=self.build_digest,
         )
         artifacts = VerificationArtifacts()
+        self._repository_visible = None
         self._deadline = self.monotonic() + self.deadline_seconds
         self._cancel_event = cancel_event
         self._progress = progress
@@ -221,10 +223,32 @@ class ReleaseVerifier:
                 pass
         return reason
 
+    def _probe_repository(self, request: VerificationRequest) -> Reason | None:
+        try:
+            result = self._json_command(
+                ["gh", "api", f"repos/{request.repo}"],
+                unavailable="GITHUB_UNAVAILABLE",
+                denied="GITHUB_ACCESS_DENIED",
+                not_found=_repository_not_visible_reason(),
+            )
+        except EvidenceError as error:
+            self._repository_visible = False
+            return error.reason
+        if not isinstance(result, dict) or result.get("full_name") != request.repo:
+            self._repository_visible = False
+            return _repository_not_visible_reason()
+        self._repository_visible = True
+        return None
+
     def _verify_source(
         self, request: VerificationRequest, report: ReportBuilder, policy: TrustedPolicy
     ) -> None:
         self._emit_progress("source.commit")
+        visibility_reason = self._probe_repository(request)
+        if visibility_reason is not None:
+            for name in ("source.commit", "source.review"):
+                self._record_reason(report, name, visibility_reason)
+            return
         try:
             result = self._json_command(
                 ["gh", "api", f"repos/{request.repo}/commits/{request.expected_commit}"],
@@ -543,6 +567,10 @@ class ReleaseVerifier:
         policy: TrustedPolicy,
     ) -> None:
         self._emit_progress("workflow.run")
+        if self._repository_visible is False:
+            for name in ("workflow.run", "release.approval"):
+                report.unknown(name, _repository_not_visible_reason())
+            return
         if attestation is None:
             report.unknown(
                 "workflow.run",
@@ -849,12 +877,33 @@ class ReleaseVerifier:
             raise EvidenceError(Reason(unavailable, "The evidence command was unavailable or exceeded safety limits.")) from error
         if result.returncode == 0:
             return result
+        status = _http_status(result.stderr)
         stderr = result.stderr.lower()
+        if status in {401, 403}:
+            if _rate_limited(stderr):
+                raise EvidenceError(Reason(unavailable, "GitHub rate limiting prevented evidence retrieval."))
+            raise EvidenceError(Reason(denied, "Authorization or RBAC prevented evidence retrieval."))
+        if status == 429 or (status is not None and status >= 500):
+            raise EvidenceError(Reason(unavailable, "A rate-limit or service failure prevented evidence retrieval."))
+        if status == 422 and not_found is not None and not_found.code == "COMMIT_NOT_FOUND":
+            raise EvidenceError(not_found)
+        if (
+            status == 404
+            and not_found is not None
+            and self._repository_visible is not False
+        ):
+            raise EvidenceError(not_found)
+        if status is not None:
+            raise EvidenceError(Reason(unavailable, "The evidence command failed without conclusive policy evidence."))
         if _access_denied(stderr):
             raise EvidenceError(Reason(denied, "Authorization or RBAC prevented evidence retrieval."))
         if _network_error(stderr):
             raise EvidenceError(Reason(unavailable, "A network, DNS, rate-limit, or service failure prevented evidence retrieval."))
-        if not_found and ("404" in stderr or "not found" in stderr):
+        if (
+            not_found
+            and self._repository_visible is not False
+            and re.search(r"\bnot found\b", stderr)
+        ):
             raise EvidenceError(not_found)
         raise EvidenceError(Reason(unavailable, "The evidence command failed without conclusive policy evidence."))
 
@@ -908,6 +957,7 @@ class ReleaseVerifier:
         evidence: tuple[str, ...] = (),
     ) -> None:
         if reason.code in {
+            "REPOSITORY_NOT_VISIBLE",
             "VERIFIER_OUTPUT_INVALID",
             "ATTESTATION_SEARCH_TRUNCATED",
             "ATTESTATION_EVIDENCE_INVALID",
@@ -947,9 +997,20 @@ class ReleaseVerifier:
 
 def _attestation_failure_reason(result: CommandResult) -> Reason:
     stderr = result.stderr.lower()
+    status = _http_status(result.stderr)
+    if status in {401, 403}:
+        if _rate_limited(stderr):
+            return Reason("ATTESTATION_UNAVAILABLE", "Rate limiting prevented attestation retrieval.")
+        return Reason("ATTESTATION_ACCESS_DENIED", "Attestation evidence retrieval was not authorized.")
+    if status == 429 or (status is not None and status >= 500):
+        return Reason("ATTESTATION_UNAVAILABLE", "A rate-limit or service failure prevented attestation retrieval.")
     if _access_denied(stderr):
         return Reason("ATTESTATION_ACCESS_DENIED", "Attestation evidence retrieval was not authorized.")
-    if "trust root" in stderr or "tuf" in stderr or _network_error(stderr):
+    if (
+        "trust root" in stderr
+        or re.search(r"\btuf (?:error|failed|failure|timeout|unavailable)\b", stderr)
+        or _network_error(stderr)
+    ):
         return Reason("TRUST_ROOT_UNAVAILABLE", "A network or trust-root dependency prevented verification.")
     if "no attestations found" in stderr or "no matching attestations" in stderr:
         return Reason("ATTESTATION_MISSING", "The authoritative lookup found no acceptable artifact attestation.")
@@ -981,12 +1042,30 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
     return int(major), int(minor), int(patch)
 
 
+def _http_status(stderr: str) -> int | None:
+    match = re.search(r"\(HTTP ([0-9]{3})\)\s*$", stderr.strip(), re.IGNORECASE)
+    return int(match.group(1)) if match is not None else None
+
+
+def _rate_limited(stderr: str) -> bool:
+    return "rate limit" in stderr or "rate-limit" in stderr
+
+
 def _access_denied(stderr: str) -> bool:
-    return any(item in stderr for item in ("forbidden", "unauthorized", "http 403", "http 401", "access denied"))
+    return re.search(r"\b(?:forbidden|unauthorized|access denied|http (?:401|403))\b", stderr) is not None
 
 
 def _network_error(stderr: str) -> bool:
-    return any(
-        item in stderr
-        for item in ("timeout", "timed out", "dns", "connection refused", "rate limit", "temporarily unavailable", "network")
+    return re.search(
+        r"\b(?:timeout|timed out|connection refused|rate limit|temporarily unavailable|"
+        r"dns (?:error|failure|timeout|unavailable|resolution)|"
+        r"network (?:error|timeout|failure|unavailable|unreachable))\b",
+        stderr,
+    ) is not None
+
+
+def _repository_not_visible_reason() -> Reason:
+    return Reason(
+        "REPOSITORY_NOT_VISIBLE",
+        "The repository is not visible to the configured GitHub credential, so later absence cannot be conclusive.",
     )

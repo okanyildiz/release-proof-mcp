@@ -59,7 +59,7 @@ The diagram shows the evidence relationships. At execution time, the verifier ta
 
 | Chain link | What it proves when verified | What it does not prove |
 | --- | --- | --- |
-| Source commit (`source.commit`) | The requested repository exposes a commit whose full SHA exactly equals `expected_commit`. | Historical branch protection, source quality, or that the commit is safe. |
+| Source commit (`source.commit`) | Repository visibility is established first, then the requested repository exposes a commit whose full SHA exactly equals `expected_commit`. A later 404 can be conclusive only after that visibility probe succeeded. | Historical branch protection, source quality, that the commit is safe, or conclusive absence when the repository itself is invisible to the credential. |
 | Reviewed change (`source.review`) | The configured PR, well-formed decision records with unique review IDs, current review decisions, exact head or merge commit, distinct allowed reviewer IDs, and non-author rule satisfy policy. | In `merged_pr` mode, direct review of the merge or squash commit; historical ruleset enforcement; reviewer infallibility. |
 | OIDC build identity and run (`attestation.verification`, `workflow.run`) | The Sigstore certificate carries the GitHub Actions issuer, exact source repository/SHA/ref, trusted signer workflow/digest, GitHub-hosted runner, and run invocation. The matching run has the expected repository, workflow, event, commit, attempt, and successful conclusion. | An uncompromised signer or runner, a benign workflow, SLSA Build L3, or cryptographically complete derivation from source. |
 | Attested artifact (`attestation.verification`) | `gh attestation verify` accepts Sigstore/DSSE evidence with SLSA v1 provenance and an in-toto subject equal to the resolved OCI digest. One fully acceptable result is sufficient. | Vulnerability absence, reproducibility, complete dependencies, or claims from workflow-controlled custom predicate fields. |
@@ -294,7 +294,7 @@ These are abridged explanatory excerpts, not standalone consumer inputs. Full `r
 }
 ```
 
-Other honest degradations include `ATTESTATION_MISSING`, `PROVENANCE_MISSING`, `VERIFIER_OUTPUT_INVALID`, `ATTESTATION_SEARCH_TRUNCATED`, `TAG_MOVED`, `RUNTIME_DIGEST_MISMATCH`, `IMAGE_ID_NOT_REGISTRY_COMPARABLE`, and `SIGNATURE_MISSING`. Network failures, timeouts, trust-root retrieval problems, rate limits, and RBAC denials become unknown coverage rather than proof of absence.
+Other honest degradations include `ATTESTATION_MISSING`, `PROVENANCE_MISSING`, `VERIFIER_OUTPUT_INVALID`, `ATTESTATION_SEARCH_TRUNCATED`, `TAG_MOVED`, `RUNTIME_DIGEST_MISMATCH`, `IMAGE_ID_NOT_REGISTRY_COMPARABLE`, and `SIGNATURE_MISSING`. Network failures, timeouts, trust-root retrieval problems, rate limits, and RBAC denials become unknown coverage rather than proof of absence. `REPOSITORY_NOT_VISIBLE` means the credential cannot establish repository visibility, so later 404 responses cannot be treated as conclusive absence.
 
 ## Portable signed receipts and independent gate
 

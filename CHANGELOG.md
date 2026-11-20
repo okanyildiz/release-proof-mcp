@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code.
+
 ## 0.1.1 - 2026-11-20
 
 ### Added

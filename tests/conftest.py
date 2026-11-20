@@ -480,6 +480,7 @@ def harness() -> Harness:
         ["kubectl", "version", "--client", "-o", "json"],
         {"clientVersion": {"gitVersion": "v1.34.0"}},
     )
+    runner.route_json(["gh", "api", "repos/acme/shop"], {"full_name": "acme/shop", "id": 555, "owner": {"id": 556}})
     runner.route_json(["gh", "api", f"repos/acme/shop/commits/{COMMIT}"], {"sha": COMMIT})
     runner.route_json(["gh", "api", "repos/acme/shop/pulls/123"], pr_object())
     runner.route_json(
