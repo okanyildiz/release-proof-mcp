@@ -76,4 +76,4 @@ Keep examples consistent with the actual request schema, trusted policy schema, 
 
 ## Questions
 
-Use [GitHub Issues](https://github.com/okanyildiz/release-proof-mcp/issues) for implementation questions and proposed changes. GitHub Discussions is not currently enabled for this private repository; an issue is the current support path for design discussion.
+Use [GitHub Issues](https://github.com/okanyildiz/release-proof-mcp/issues) for implementation questions and proposed changes. GitHub Discussions is not enabled for this repository; an issue is the current support path for design discussion.

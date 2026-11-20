@@ -8,6 +8,10 @@
 - Add `release-proof demo` for a zero-infrastructure, explicitly simulated signed evidence flow with an ephemeral in-memory key, independent consumer allowance, one-byte tamper denial, digest mismatch, and registry-unavailable outcomes.
 - Move the raw stdio MCP client example to `docs/mcp-capture.md` and make `GUIDE.md` capture instructions CLI-centered.
 
+### Changed
+
+- Replace the root README with a one-page trust-separation and adoption guide. Preserve the detailed verification, configuration, integration, security, and FAQ material in `docs/reference.md` with corrected links and current validation evidence.
+
 ### Fixed
 
 - Reject an empty evidence-package root before policy loading, verification, signing, or filesystem writes on both CLI and MCP, avoiding publication into the current directory.
