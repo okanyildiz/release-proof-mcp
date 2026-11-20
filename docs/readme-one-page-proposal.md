@@ -49,9 +49,9 @@ This is alpha software with a narrow supported topology: GitHub.com, Actions, GH
 
 Current validation includes:
 
-- 805 deterministic tests passed locally on macOS with three skips. Windows CI reports 803 passed with five platform- or capability-specific skips on each Python version; two skips on each host are opt-in live tests.
+- The producer CLI branch reports 807 deterministic tests passed locally on macOS with three skips. Windows CI reports 805 passed with five platform- or capability-specific skips on each Python version; two skips on each host are opt-in live tests.
 - Real single-operator live runs covering GitHub, GHCR, kind, OpenBao Transit, a signed standalone receipt, and a five-file package with independent offline allow/deny behavior.
-- The [nine-job GitHub Actions CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44789256329) passed on Linux, macOS, and Windows with Python 3.11, 3.12, and 3.13.
+- The [nine-job GitHub Actions CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44796240654) passed on Linux, macOS, and Windows with Python 3.11, 3.12, and 3.13.
 - `v0.1.0` and `v0.1.1` artifacts were built locally and are unattested. `v0.1.2` is prepared for workflow-built, attested artifacts, but no such release is claimed here.
 
 These runs do not establish independent organizational adoption, production key custody, production TLS/HA, Cosign interoperability, or a managed-Kubernetes/provider matrix.
@@ -73,7 +73,7 @@ This pre-release preview pins the reviewed commit containing the producer CLI. I
 ```sh
 git clone https://github.com/okanyildiz/release-proof-mcp.git
 cd release-proof-mcp
-git checkout 08a8ef619807b5b1e3a33bacb59730e3aab933c9
+git checkout 37434485d567c0fffcf836cfd296588c4167f16e
 python3.11 -m venv .venv
 . .venv/bin/activate
 pip install .
