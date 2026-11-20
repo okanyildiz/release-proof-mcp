@@ -100,6 +100,7 @@ class ReleaseVerifier:
         self._cancel_event: threading.Event | None = None
         self._progress: Callable[[str], None] | None = None
         self._repository_visible: bool | None = None
+        self._repository_error_reason: Reason | None = None
 
     def verify(
         self,
@@ -135,6 +136,7 @@ class ReleaseVerifier:
         )
         artifacts = VerificationArtifacts()
         self._repository_visible = None
+        self._repository_error_reason = None
         self._deadline = self.monotonic() + self.deadline_seconds
         self._cancel_event = cancel_event
         self._progress = progress
@@ -233,11 +235,15 @@ class ReleaseVerifier:
             )
         except EvidenceError as error:
             self._repository_visible = False
+            self._repository_error_reason = error.reason
             return error.reason
-        if not isinstance(result, dict) or result.get("full_name") != request.repo:
+        full_name = result.get("full_name") if isinstance(result, dict) else None
+        if not isinstance(full_name, str) or full_name.casefold() != request.repo.casefold():
             self._repository_visible = False
-            return _repository_not_visible_reason()
+            self._repository_error_reason = _repository_not_visible_reason()
+            return self._repository_error_reason
         self._repository_visible = True
+        self._repository_error_reason = None
         return None
 
     def _verify_source(
@@ -456,6 +462,13 @@ class ReleaseVerifier:
         policy: TrustedPolicy,
         artifacts: VerificationArtifacts,
     ) -> tuple[int, int] | None:
+        if self._repository_visible is False:
+            self._record_reason(
+                report,
+                "attestation.verification",
+                self._repository_error_reason or _repository_not_visible_reason(),
+            )
+            return None
         if (
             request.signer_workflow != policy.signer_workflow
             or request.signer_digest != policy.signer_digest
@@ -569,7 +582,10 @@ class ReleaseVerifier:
         self._emit_progress("workflow.run")
         if self._repository_visible is False:
             for name in ("workflow.run", "release.approval"):
-                report.unknown(name, _repository_not_visible_reason())
+                report.unknown(
+                    name,
+                    self._repository_error_reason or _repository_not_visible_reason(),
+                )
             return
         if attestation is None:
             report.unknown(
@@ -755,11 +771,14 @@ class ReleaseVerifier:
             return
         if result.returncode != 0:
             stderr = result.stderr.lower()
-            if _access_denied(stderr):
+            status = _http_status(result.stderr)
+            if _rate_limited(stderr) or status == 429 or (status is not None and status >= 500):
+                report.unknown("signature.cosign", Reason("COSIGN_UNAVAILABLE", "Cosign retrieval was rate-limited or unavailable."))
+            elif status in {401, 403} or _access_denied(stderr):
                 report.unknown("signature.cosign", Reason("COSIGN_ACCESS_DENIED", "Cosign evidence retrieval was denied."))
             elif "no signatures found" in stderr or "no matching signatures" in stderr:
                 report.failed("signature.cosign", Reason("SIGNATURE_MISSING", "The required independent Cosign signature is missing."))
-            elif _network_error(stderr) or "trust root" in stderr or "tuf" in stderr:
+            elif _network_error(stderr) or "trust root" in stderr or re.search(r"\btuf (?:error|failed|failure|timeout|unavailable)\b", stderr):
                 report.unknown("signature.cosign", Reason("COSIGN_UNAVAILABLE", "Cosign verification dependencies were unavailable."))
             else:
                 report.failed("signature.cosign", Reason("SIGNATURE_INVALID", "Cosign rejected the required independent signature."))
@@ -879,9 +898,9 @@ class ReleaseVerifier:
             return result
         status = _http_status(result.stderr)
         stderr = result.stderr.lower()
+        if _rate_limited(stderr):
+            raise EvidenceError(Reason(unavailable, "GitHub rate limiting prevented evidence retrieval."))
         if status in {401, 403}:
-            if _rate_limited(stderr):
-                raise EvidenceError(Reason(unavailable, "GitHub rate limiting prevented evidence retrieval."))
             raise EvidenceError(Reason(denied, "Authorization or RBAC prevented evidence retrieval."))
         if status == 429 or (status is not None and status >= 500):
             raise EvidenceError(Reason(unavailable, "A rate-limit or service failure prevented evidence retrieval."))
@@ -998,9 +1017,9 @@ class ReleaseVerifier:
 def _attestation_failure_reason(result: CommandResult) -> Reason:
     stderr = result.stderr.lower()
     status = _http_status(result.stderr)
+    if _rate_limited(stderr):
+        return Reason("ATTESTATION_UNAVAILABLE", "Rate limiting prevented attestation retrieval.")
     if status in {401, 403}:
-        if _rate_limited(stderr):
-            return Reason("ATTESTATION_UNAVAILABLE", "Rate limiting prevented attestation retrieval.")
         return Reason("ATTESTATION_ACCESS_DENIED", "Attestation evidence retrieval was not authorized.")
     if status == 429 or (status is not None and status >= 500):
         return Reason("ATTESTATION_UNAVAILABLE", "A rate-limit or service failure prevented attestation retrieval.")

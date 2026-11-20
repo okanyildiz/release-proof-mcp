@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code.
+- Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code. Probe failures preserve their actual reason across source, attestation, workflow, and approval checks and skip attestation retrieval. Repository names are compared case-insensitively, and Cosign uses the same denial/rate-limit/service-error mapping.
 
 ## 0.1.1 - 2026-11-20
 

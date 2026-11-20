@@ -27,14 +27,17 @@ def test_invisible_repository_is_unknown_and_stops_commit_lookup(harness: Harnes
         stderr="gh: Not Found (HTTP 404)",
         returncode=1,
     )
+    harness.set_attestation([], returncode=1, stderr="no attestations found")
 
     report = harness.verify()
 
+    assert report["status"] == "unknown"
     for name in ("source.commit", "source.review", "workflow.run", "release.approval"):
         result = check(report, name)
         assert result["status"] == "unknown"
         assert result["reason"]["code"] == "REPOSITORY_NOT_VISIBLE"
     assert ("gh", "api", f"repos/acme/shop/commits/{COMMIT}") not in harness.runner.calls
+    assert not any(call[:2] == ("gh", "attestation") for call in harness.runner.calls)
 
 
 def test_repository_permission_denied_is_unknown(harness: Harness) -> None:
