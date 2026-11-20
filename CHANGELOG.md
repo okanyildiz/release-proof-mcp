@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 - Unreleased
+
+### Added
+
+- Add `release-proof capture` for CLI-based production of signed receipts and optional five-file evidence packages through the same policy, verification, signing, export, and size-bound path used by MCP.
+- Add `release-proof demo` for a zero-infrastructure, explicitly simulated signed evidence flow with an ephemeral in-memory key, independent consumer allowance, one-byte tamper denial, digest mismatch, and registry-unavailable outcomes.
+- Move the raw stdio MCP client example to `docs/mcp-capture.md` and make `GUIDE.md` capture instructions CLI-centered.
+
 ## 0.1.1 - 2026-11-20
 
 ### Added

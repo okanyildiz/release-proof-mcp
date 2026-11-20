@@ -10,10 +10,16 @@ from typing import Any, BinaryIO, Callable
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from .evidence_package import export_evidence_package
+from .capture import (
+    MAX_RECEIPT_BYTES,
+    ReceiptSizeError,
+    capture_release,
+    load_policy_store,
+    verifier_from_environment,
+)
 from .version import __version__
 from .policy import PolicyConfigurationError, PolicyStore
-from .request import INPUT_SCHEMA, ValidationError, VerificationRequest
+from .request import INPUT_SCHEMA, ValidationError
 from .strict_json import strict_json_loads
 from .signers.openbao import (
     DEFAULT_OPENBAO_TIMEOUT_SECONDS,
@@ -25,7 +31,6 @@ from .verifier import ReleaseVerifier
 
 PROTOCOL_VERSION = "2025-06-18"
 MAX_MESSAGE_BYTES = 1024 * 1024
-MAX_RECEIPT_BYTES = 512 * 1024
 WORKER_SHUTDOWN_SECONDS = 130.0
 MAX_CONCURRENT_CALLS = 4
 EVIDENCE_PACKAGE_ROOT_ENVIRONMENT = "RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT"
@@ -112,10 +117,7 @@ class MCPServer:
         self._write_lock = threading.Lock()
 
     def _default_verifier(self) -> ReleaseVerifier:
-        return ReleaseVerifier(
-            verifier_instance_id=os.environ.get("RELEASE_PROOF_VERIFIER_INSTANCE_ID"),
-            build_digest=os.environ.get("RELEASE_PROOF_BUILD_DIGEST"),
-        )
+        return verifier_from_environment(ReleaseVerifier)
 
     def handle(self, message: Any) -> dict[str, Any] | None:
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
@@ -189,81 +191,37 @@ class MCPServer:
                 else:
                     progress_token = _progress_token(params)
                     active_profile = self.policy_profile or os.environ.get("RELEASE_PROOF_POLICY_PROFILE")
-                    policy = self._policies().select(active_profile)
-                    request = VerificationRequest.from_dict(
-                        params.get("arguments"),
-                        signer_workflow_default=policy.signer_workflow,
-                        signer_digest_default=policy.signer_digest,
-                    )
                     progress = (
                         self._progress_callback(progress_token, cancel_event)
                         if progress_token is not None
                         else None
                     )
-                    verifier = self.verifier_factory()
-                    if self._evidence_package_root is not None:
-                        receipt, artifacts = verifier.verify_detailed(
-                            request,
-                            policy,
-                            cancel_event=cancel_event,
-                            progress=progress,
-                        )
-                        if self._signing is None:
-                            raise ValueError("Evidence package export requires signing")
-                        signer, signing_issuer, signing_keyid = self._signing
-                        if receipt["status"] == "verified" and not receipt["evidence_truncation"]:
-                            report = export_evidence_package(
-                                receipt,
-                                artifacts,
-                                signer,
-                                signing_issuer,
-                                signing_keyid,
-                                self._evidence_package_root,
-                                cancel_event=cancel_event,
-                                max_receipt_bytes=MAX_RECEIPT_BYTES,
-                            )
-                        else:
-                            report = sign_receipt(
-                                receipt,
-                                signer,
-                                signing_issuer,
-                                signing_keyid,
-                                cancel_event=cancel_event,
-                            )
-                    else:
-                        report = verifier.verify(
-                            request,
-                            policy,
-                            cancel_event=cancel_event,
-                            progress=progress,
-                        )
-                        if self._signing is not None:
-                            signer, signing_issuer, signing_keyid = self._signing
-                            report = sign_receipt(
-                                report,
-                                signer,
-                                signing_issuer,
-                                signing_keyid,
-                                cancel_event=cancel_event,
-                            )
-                    encoded = json.dumps(
-                        report, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    captured = capture_release(
+                        params.get("arguments"),
+                        policy_store=self._policies(),
+                        verifier=self.verifier_factory(),
+                        active_profile=active_profile,
+                        signing=self._signing,
+                        evidence_package_root=self._evidence_package_root,
+                        cancel_event=cancel_event,
+                        progress=progress,
+                        max_receipt_bytes=MAX_RECEIPT_BYTES,
+                        receipt_signer=sign_receipt,
                     )
-                    if len(encoded.encode("utf-8")) > MAX_RECEIPT_BYTES:
-                        response = _error(
-                            request_id,
-                            -32603,
-                            "Verification receipt exceeded the size limit; no evidence claim was returned",
-                        )
-                    else:
-                        response = _result(
-                            request_id,
-                            {
-                                "content": [{"type": "text", "text": encoded}],
-                                "structuredContent": report,
-                                "isError": False,
-                            },
-                        )
+                    response = _result(
+                        request_id,
+                        {
+                            "content": [{"type": "text", "text": captured.encoded.decode("utf-8")}],
+                            "structuredContent": captured.receipt,
+                            "isError": False,
+                        },
+                    )
+            except ReceiptSizeError:
+                response = _error(
+                    request_id,
+                    -32603,
+                    "Verification receipt exceeded the size limit; no evidence claim was returned",
+                )
             except ValidationError as error:
                 response = _error(request_id, -32602, str(error))
             except PolicyConfigurationError:
@@ -286,10 +244,7 @@ class MCPServer:
     def _policies(self) -> PolicyStore:
         if self.policy_store is not None:
             return self.policy_store
-        path = self.policy_file or os.environ.get("RELEASE_PROOF_POLICY_FILE")
-        if not path:
-            raise PolicyConfigurationError("Trusted policy is not configured.")
-        return PolicyStore.from_file(path)
+        return load_policy_store(self.policy_file)
 
     def _ensure_cancel_event(self, request_id: Any) -> threading.Event:
         with self._cancel_lock:

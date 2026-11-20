@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-776%20passed-14b8a6?style=for-the-badge" alt="Tests: 776 passed"></a>
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-789%20passed-14b8a6?style=for-the-badge" alt="Tests: 789 passed"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
@@ -30,6 +30,31 @@
 
 > [!IMPORTANT]
 > This is an MVP evidence verifier, not an admission controller or a software-safety claim. Both `failed` and `unknown` mean **not verified** and must fail closed when used by a deployment gate.
+
+## Sixty-second simulated demo
+
+See the trust model without configuring GitHub, a registry, Kubernetes, or OpenBao. The demo uses only packaged simulated responses and an ephemeral in-memory Ed25519 key:
+
+```sh
+release-proof demo
+```
+
+```text
+[SIMULATED] Verified signed receipt: id=cc880909-0b2c-4c3a-a733-447c807ca260
+[SIMULATED] Independent consumer: allow=True, reason=OK
+[SIMULATED] One-byte tamper: allow=False, reason=RECEIPT_INVALID
+[SIMULATED] Digest mismatch: status=failed, reason=TAG_MOVED
+[SIMULATED] Registry unavailable: status=unknown, reason=REGISTRY_UNAVAILABLE
+[SIMULATED] No network, provider, cluster, or external signing service was used
+```
+
+This is simulated evidence, not a live integration result. The receipt is genuinely signed and checked by the independent consumer, including a one-byte tamper denial. The demo never uses a configured evidence package root or writes the key to disk.
+
+To capture real evidence through the same verification path used by MCP, use the [CLI-centered guide](GUIDE.md#7-capture-a-receipt-with-the-cli):
+
+```sh
+release-proof capture --request capture-request.json --nonce-file consumer-nonce.txt --out current-receipt.json
+```
 
 ## What it does
 
@@ -529,7 +554,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **776 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
+The current offline suite reports **789 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
 python -m pip install '.[test]'
