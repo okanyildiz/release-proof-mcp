@@ -1062,7 +1062,11 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
 
 
 def _http_status(stderr: str) -> int | None:
-    match = re.search(r"\(HTTP ([0-9]{3})\)\s*$", stderr.strip(), re.IGNORECASE)
+    text = stderr.strip()
+    match = re.search(r"\(HTTP ([0-9]{3})\)\s*$", text, re.IGNORECASE)
+    if match is not None:
+        return int(match.group(1))
+    match = re.fullmatch(r"(?:gh:\s*)?HTTP ([0-9]{3})\s*", text, re.IGNORECASE)
     return int(match.group(1)) if match is not None else None
 
 

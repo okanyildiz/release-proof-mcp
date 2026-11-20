@@ -122,3 +122,48 @@ def test_cosign_rate_limit_and_server_errors_are_unavailable(
 
     assert result["status"] == "unknown"
     assert result["reason"]["code"] == "COSIGN_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_plain_status_attestation_errors_are_unavailable(
+    harness: Harness, status: int
+) -> None:
+    harness.set_attestation([], returncode=1, stderr=f"gh: HTTP {status}")
+
+    result = check(harness.verify(), "attestation.verification")
+
+    assert result["status"] == "unknown"
+    assert result["reason"]["code"] == "ATTESTATION_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_plain_status_cosign_errors_are_unavailable(
+    harness: Harness, status: int
+) -> None:
+    harness.policy["require_cosign_signature"] = True
+    harness.runner.route(["cosign", "version"], "v2.5.0")
+    harness.runner.route(
+        cosign_argv(harness), returncode=1, stderr=f"gh: HTTP {status}"
+    )
+
+    result = check(harness.verify(), "signature.cosign")
+
+    assert result["status"] == "unknown"
+    assert result["reason"]["code"] == "COSIGN_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("status", [404, 422])
+def test_plain_status_absence_codes_are_conclusive_after_probe(
+    harness: Harness, status: int
+) -> None:
+    harness.runner.route(
+        ["gh", "api", f"repos/acme/shop/commits/{COMMIT}"],
+        "",
+        stderr=f"gh: HTTP {status}",
+        returncode=1,
+    )
+
+    result = check(harness.verify(), "source.commit")
+
+    assert result["status"] == "failed"
+    assert result["reason"]["code"] == "COMMIT_NOT_FOUND"
