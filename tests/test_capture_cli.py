@@ -11,7 +11,14 @@ from release_proof_mcp import capture as capture_module
 from release_proof_mcp import cli as cli_module
 from release_proof_mcp.verifier import ReleaseVerifier
 from test_evidence_package import PACKAGE_FILENAMES, set_valid_attestation
+from test_signed_mcp import SIGNING_ENVIRONMENT
 from test_signing import ISSUER, KEYID, NONCE, PRIVATE_KEY
+
+
+@pytest.fixture(autouse=True)
+def clear_signing_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in SIGNING_ENVIRONMENT:
+        monkeypatch.delenv(name, raising=False)
 
 
 def invoke(
@@ -39,6 +46,10 @@ def invoke(
     )
     captured = capsys.readouterr()
     return status, captured.out, captured.err
+
+
+def test_capture_test_environment_is_isolated() -> None:
+    assert all(name not in os.environ for name in SIGNING_ENVIRONMENT)
 
 
 def test_capture_verified_unsigned_receipt_on_stdout(
@@ -187,6 +198,32 @@ def test_signing_failure_never_returns_unsigned_receipt(
     assert status == 2
     assert stdout == ""
     assert "no receipt was emitted" in stderr
+
+
+def test_package_signing_failure_preserves_error_channel_and_filesystem(
+    tmp_path: Path, harness: Harness, monkeypatch, capsys
+) -> None:
+    set_valid_attestation(harness)
+    root = tmp_path / "packages"
+
+    def fail_signing(*args, **kwargs):
+        raise ValueError("package-signing-canary")
+
+    monkeypatch.setattr("release_proof_mcp.evidence_package.sign_receipt", fail_signing)
+
+    status, stdout, stderr = invoke(
+        harness,
+        tmp_path,
+        monkeypatch,
+        capsys,
+        signing=(PRIVATE_KEY, ISSUER, KEYID),
+        package_root=root,
+    )
+
+    assert status == 2
+    assert stdout == ""
+    assert stderr == "error: command failed; no receipt was emitted\n"
+    assert not root.exists()
 
 
 def test_empty_package_root_is_rejected_before_verification(

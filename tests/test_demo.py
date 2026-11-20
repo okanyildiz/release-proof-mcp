@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import socket
+import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from release_proof_mcp import cli as cli_module
 from release_proof_mcp.demo import DemoRunner, run_demo
+from test_signed_mcp import SIGNING_ENVIRONMENT
 
 
 def test_demo_runs_signed_allow_tamper_failed_and_unknown(capsys) -> None:
@@ -28,14 +32,24 @@ def test_demo_ignores_configured_package_root_and_writes_no_keys(
 ) -> None:
     package_root = tmp_path / "must-not-exist"
     monkeypatch.setenv("RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT", str(package_root))
+    for name in SIGNING_ENVIRONMENT:
+        monkeypatch.setenv(name, "ambient-test-only")
+    monkeypatch.setattr(
+        subprocess, "Popen", Mock(side_effect=AssertionError("subprocess forbidden"))
+    )
+    monkeypatch.setattr(
+        socket, "create_connection", Mock(side_effect=AssertionError("network forbidden"))
+    )
+    monkeypatch.setattr(
+        socket.socket, "connect", Mock(side_effect=AssertionError("network forbidden"))
+    )
     monkeypatch.chdir(tmp_path)
 
     status = cli_module.main(["demo"])
 
     assert status == 0
     assert not package_root.exists()
-    assert not list(tmp_path.rglob("*.pem"))
-    assert not list(tmp_path.rglob("*.key"))
+    assert list(tmp_path.iterdir()) == []
     assert capsys.readouterr().out.startswith("[SIMULATED]")
 
 
