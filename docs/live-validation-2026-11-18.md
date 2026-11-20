@@ -1,4 +1,4 @@
-# Live interoperability evidence — 2026-11-18
+# Live interoperability evidence: 2026-11-18
 
 ## Scope
 
