@@ -92,6 +92,124 @@ def test_real_process_cancellation_terminates_command() -> None:
     assert time.monotonic() - started < 2.0
 
 
+def test_second_reader_start_failure_cleans_up_started_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_popen = subprocess.Popen
+    real_start = threading.Thread.start
+    processes: list[subprocess.Popen[bytes]] = []
+    started_threads: list[threading.Thread] = []
+    start_attempts = 0
+
+    def capture_process(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def fail_second_start(thread: threading.Thread) -> None:
+        nonlocal start_attempts
+        start_attempts += 1
+        if start_attempts == 2:
+            raise RuntimeError("reader start failed")
+        real_start(thread)
+        started_threads.append(thread)
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    monkeypatch.setattr(threading.Thread, "start", fail_second_start)
+    runner = ProcessRunner(reader_timeout_seconds=0.1, environment={})
+
+    with pytest.raises(RuntimeError, match="reader start failed"):
+        runner.run([sys.executable, "-c", "import time;time.sleep(30)"])
+
+    assert len(started_threads) == 1
+    assert not started_threads[0].is_alive()
+    assert processes[0].returncode is not None
+
+
+def test_unexpected_wait_failure_kills_and_cleans_up_readers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_popen = subprocess.Popen
+    real_wait = subprocess.Popen.wait
+    real_start = threading.Thread.start
+    processes: list[subprocess.Popen[bytes]] = []
+    wait_calls: list[subprocess.Popen[bytes]] = []
+    started_threads: list[threading.Thread] = []
+
+    def capture_process(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def fail_wait(process: subprocess.Popen[bytes], **kwargs: object) -> int:
+        wait_calls.append(process)
+        raise RuntimeError("unexpected wait failure")
+
+    def capture_start(thread: threading.Thread) -> None:
+        real_start(thread)
+        started_threads.append(thread)
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    monkeypatch.setattr(real_popen, "wait", fail_wait)
+    monkeypatch.setattr(threading.Thread, "start", capture_start)
+    runner = ProcessRunner(reader_timeout_seconds=0.1, environment={})
+
+    with pytest.raises(RuntimeError, match="unexpected wait failure"):
+        runner.run([sys.executable, "-c", "import time;time.sleep(30)"])
+
+    real_wait(processes[0], timeout=1)
+    assert wait_calls == [processes[0], processes[0]]
+    assert processes[0].returncode is not None
+    assert len(started_threads) == 2
+    assert all(not thread.is_alive() for thread in started_threads)
+
+
+def test_cancellation_at_process_exit_boundary_does_not_return_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = threading.Event()
+    real_popen = subprocess.Popen
+    real_wait = subprocess.Popen.wait
+    processes: list[subprocess.Popen[bytes]] = []
+
+    def capture_process(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def cancel_after_wait(process: subprocess.Popen[bytes], **kwargs: object) -> int:
+        result = real_wait(process, **kwargs)
+        cancelled.set()
+        return result
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    monkeypatch.setattr(real_popen, "wait", cancel_after_wait)
+
+    with pytest.raises(CommandCancelled):
+        ProcessRunner(environment={}).run(
+            [sys.executable, "-c", "print('done')"], cancel_event=cancelled
+        )
+
+    assert processes[0].returncode is not None
+
+
+def test_cancellation_after_reader_drain_does_not_return_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = threading.Event()
+    runner = ProcessRunner(environment={})
+    real_finish_readers = runner._finish_readers
+
+    def cancel_after_drain(*args: object) -> None:
+        real_finish_readers(*args)
+        cancelled.set()
+
+    monkeypatch.setattr(runner, "_finish_readers", cancel_after_drain)
+
+    with pytest.raises(CommandCancelled):
+        runner.run([sys.executable, "-c", "print('done')"], cancel_event=cancelled)
+
+
 def test_real_process_uses_no_shell(monkeypatch: pytest.MonkeyPatch) -> None:
     real_popen = subprocess.Popen
     captured: dict[str, object] = {}

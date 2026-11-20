@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import Any
 
 from .report import Reason
 from .request import ReleasePolicy, ReviewPolicy
+
+RFC3339_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
 
 
 class PolicyViolation(ValueError):
@@ -49,7 +55,7 @@ def validate_review(
         "mode": policy.mode,
         "head_sha": head_sha,
         "merge_commit_sha": merge_sha,
-        "merge_commit_directly_reviewed": policy.mode == "exact_head",
+        "expected_commit_directly_reviewed": policy.mode == "exact_head",
     }
     base = pr.get("base") if isinstance(pr.get("base"), dict) else {}
     base_repo = base.get("repo") if isinstance(base.get("repo"), dict) else {}
@@ -74,16 +80,27 @@ def validate_review(
                 ),
                 {"pull_request": pr_evidence},
             )
-    elif pr.get("merged_at") is None or merge_sha != expected_commit:
-        raise PolicyViolation(
-            Reason(
-                "REVIEW_POLICY_FAILED",
-                "merged_pr mode requires a merged PR whose merge commit equals the expected commit.",
-                expected_commit,
-                merge_sha,
-            ),
-            {"pull_request": pr_evidence},
-        )
+    elif policy.mode == "merged_pr":
+        if pr.get("merged_at") is None or merge_sha != expected_commit:
+            raise PolicyViolation(
+                Reason(
+                    "REVIEW_POLICY_FAILED",
+                    "merged_pr mode requires a merged PR whose merge commit equals the expected commit.",
+                    expected_commit,
+                    merge_sha,
+                ),
+                {"pull_request": pr_evidence},
+            )
+        try:
+            _parse_rfc3339(pr.get("merged_at"))
+        except ValueError as error:
+            raise PolicyViolation(
+                Reason(
+                    "REVIEW_POLICY_FAILED",
+                    "merged_pr mode requires a valid timezone-aware RFC3339 merged_at timestamp.",
+                ),
+                {"pull_request": pr_evidence},
+            ) from error
     if not isinstance(head_sha, str) or not head_sha:
         raise PolicyViolation(
             Reason("REVIEW_POLICY_FAILED", "The pull request has no final head SHA."),
@@ -104,18 +121,44 @@ def validate_review(
 
     reviews = _flatten_review_pages(review_pages)
     latest: dict[int, dict[str, Any]] = {}
+    seen_review_ids: set[int] = set()
     for review in reviews:
-        if not isinstance(review, dict) or review.get("state") not in {
-            "APPROVED",
-            "CHANGES_REQUESTED",
-            "DISMISSED",
-        }:
+        state = review.get("state")
+        if state in {"COMMENTED", "PENDING"}:
             continue
+        if state not in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            raise PolicyViolation(
+                Reason("REVIEW_EVIDENCE_INVALID", "A review has an unknown or missing state."),
+                {"pull_request": pr_evidence},
+            )
         user = review.get("user") if isinstance(review.get("user"), dict) else {}
         reviewer_id = user.get("id")
-        if isinstance(reviewer_id, bool) or not isinstance(reviewer_id, int):
-            continue
-        if reviewer_id not in latest or _review_order(review) > _review_order(latest[reviewer_id]):
+        if not _positive_id(reviewer_id):
+            raise PolicyViolation(
+                Reason("REVIEW_EVIDENCE_INVALID", "A decision review lacks a valid positive reviewer ID."),
+                {"pull_request": pr_evidence},
+            )
+        try:
+            order = _review_order(review)
+        except ValueError as error:
+            raise PolicyViolation(
+                Reason(
+                    "REVIEW_EVIDENCE_INVALID",
+                    "A decision review requires a positive review ID and timezone-aware RFC3339 submitted_at.",
+                ),
+                {"pull_request": pr_evidence},
+            ) from error
+        review_id = order[1]
+        if review_id in seen_review_ids:
+            raise PolicyViolation(
+                Reason(
+                    "REVIEW_EVIDENCE_INVALID",
+                    "A security-decision review ID occurs more than once across review pages.",
+                ),
+                {"pull_request": pr_evidence},
+            )
+        seen_review_ids.add(review_id)
+        if reviewer_id not in latest or order > _review_order(latest[reviewer_id]):
             latest[reviewer_id] = review
 
     review_evidence = [
@@ -168,8 +211,8 @@ def validate_workflow_run(
         raise PolicyViolation(Reason("WORKFLOW_RUN_POLICY_FAILED", "Workflow run evidence is malformed."))
     repository = run.get("repository") if isinstance(run.get("repository"), dict) else {}
     checks = {
-        "run ID": run.get("id") == run_id,
-        "run attempt": run.get("run_attempt") == attempt,
+        "run ID": _positive_id(run.get("id")) and run.get("id") == run_id,
+        "run attempt": _positive_id(run.get("run_attempt")) and run.get("run_attempt") == attempt,
         "repository": repository.get("full_name") == repo,
         "source commit": run.get("head_sha") == expected_commit,
         "workflow path": run.get("path") == workflow,
@@ -229,15 +272,31 @@ def validate_release_approval(
         if not isinstance(approval, dict) or approval.get("state") != "approved":
             continue
         environments = approval.get("environments")
-        if not isinstance(environments, list):
-            continue
-        names = [item.get("name") for item in environments if isinstance(item, dict)]
+        if not isinstance(environments, list) or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or not item.get("name")
+            for item in environments
+        ):
+            raise PolicyViolation(
+                Reason(
+                    "RELEASE_APPROVAL_EVIDENCE_INVALID",
+                    "An approved record has a malformed environments array.",
+                )
+            )
+        names = [item["name"] for item in environments]
         if policy.environment not in names:
             continue
         user = approval.get("user") if isinstance(approval.get("user"), dict) else {}
         user_id = user.get("id")
-        if _positive_id(user_id):
-            environment_matches.append((approval, user_id))
+        if not _positive_id(user_id):
+            raise PolicyViolation(
+                Reason(
+                    "RELEASE_APPROVAL_EVIDENCE_INVALID",
+                    "An approved record for the required environment has no valid positive user ID.",
+                )
+            )
+        environment_matches.append((approval, user_id))
     if not environment_matches:
         raise PolicyViolation(
             Reason(
@@ -266,23 +325,35 @@ def validate_release_approval(
 
 def _flatten_review_pages(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
-        raise PolicyViolation(Reason("REVIEW_POLICY_FAILED", "Review pagination evidence is malformed."))
+        raise PolicyViolation(Reason("REVIEW_EVIDENCE_INVALID", "Review pagination evidence is malformed."))
     if all(isinstance(item, dict) for item in value):
         return value
     reviews: list[dict[str, Any]] = []
     for page in value:
         if not isinstance(page, list) or any(not isinstance(item, dict) for item in page):
-            raise PolicyViolation(Reason("REVIEW_POLICY_FAILED", "Review pagination evidence is malformed."))
+            raise PolicyViolation(Reason("REVIEW_EVIDENCE_INVALID", "Review pagination evidence is malformed."))
         reviews.extend(page)
     return reviews
 
 
-def _review_order(review: dict[str, Any]) -> tuple[str, int]:
+def _review_order(review: dict[str, Any]) -> tuple[datetime, int]:
     review_id = review.get("id")
-    if isinstance(review_id, bool) or not isinstance(review_id, int):
-        review_id = 0
-    submitted_at = review.get("submitted_at")
-    return (submitted_at if isinstance(submitted_at, str) else "", review_id)
+    if not _positive_id(review_id):
+        raise ValueError("Invalid review ordering evidence.")
+    return _parse_rfc3339(review.get("submitted_at")), review_id
+
+
+def _parse_rfc3339(value: Any) -> datetime:
+    if not isinstance(value, str) or not RFC3339_RE.fullmatch(value):
+        raise ValueError("Invalid RFC3339 timestamp.")
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except (ValueError, OverflowError) as error:
+        raise ValueError("Invalid RFC3339 timestamp.") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("Invalid RFC3339 timestamp.")
+    return parsed
 
 
 def _review_evidence(review: dict[str, Any], repo: str, number: int) -> dict[str, Any]:

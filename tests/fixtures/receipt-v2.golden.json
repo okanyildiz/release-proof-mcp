@@ -1,0 +1,221 @@
+{
+  "schema_version": "release-deployment-proof/v2",
+  "receipt_id": "123e4567-e89b-42d3-a456-426614174000",
+  "consumer_nonce": "Ab09_-abcdefghijklmnopqrst",
+  "verifier": {
+    "name": "release-proof-mcp",
+    "version": "0.1.0",
+    "instance_id": null,
+    "build_digest": null
+  },
+  "status": "verified",
+  "summary": "Kubernetes reported the OCI image attested by the approved workflow at the expected commit; the server-side review and release policy passed.",
+  "started_at": "2026-11-18T12:00:00Z",
+  "completed_at": "2026-11-18T12:00:00Z",
+  "subject": {
+    "repo": "acme/shop",
+    "expected_commit": "0123456789abcdef0123456789abcdef01234567",
+    "artifact_input": "ghcr.io/acme/shop:v1.4.0",
+    "pinned_artifact": "ghcr.io/acme/shop@sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+    "source_ref": "refs/heads/main",
+    "workflow": ".github/workflows/release.yml",
+    "expected_run": {
+      "id": 123456789,
+      "attempt": 1
+    },
+    "source_repository_id": "555",
+    "source_repository_owner_id": null,
+    "kube_context": "production",
+    "namespace": "production",
+    "deployment": "shop-api",
+    "container": "api"
+  },
+  "policy_descriptor": {
+    "profile": "production",
+    "version": "test-v1",
+    "hash": "sha256:5094ccd7066bf0a4973f45528f74ff527fcdfb0114e3e2c3963ba5a7d54e562e"
+  },
+  "effective_policy": {
+    "profile": "production",
+    "version": "test-v1",
+    "signer_workflow": "acme/shop/.github/workflows/release.yml",
+    "signer_digest": "89abcdef0123456789abcdef0123456789abcdef",
+    "review": {
+      "pull_request": 123,
+      "mode": "merged_pr",
+      "min_approvals": 1,
+      "allowed_reviewer_ids": [1001, 1002],
+      "require_non_author": true
+    },
+    "release": {
+      "event": "push",
+      "environment": "production",
+      "required_approver_ids": [2001, 2002],
+      "prevent_self_approval": true
+    },
+    "require_cosign_signature": false
+  },
+  "policy_hash": "sha256:5094ccd7066bf0a4973f45528f74ff527fcdfb0114e3e2c3963ba5a7d54e562e",
+  "checks": [
+    {
+      "name": "source.commit",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["commit"]
+    },
+    {
+      "name": "source.review",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["pull_request", "reviews"]
+    },
+    {
+      "name": "registry.resolution",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["registry"]
+    },
+    {
+      "name": "attestation.verification",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["attestation", "certificate"]
+    },
+    {
+      "name": "workflow.run",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["workflow_run"]
+    },
+    {
+      "name": "release.approval",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["release_approvals"]
+    },
+    {
+      "name": "runtime.rollout",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["pods"]
+    },
+    {
+      "name": "runtime.digest_match",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["pods"]
+    },
+    {
+      "name": "runtime.stable_observation",
+      "status": "verified",
+      "reason": null,
+      "evidence": ["pods"]
+    }
+  ],
+  "reasons": [],
+  "missing_coverage": [],
+  "evidence": {
+    "commit": {
+      "sha": "0123456789abcdef0123456789abcdef01234567",
+      "url": "https://github.com/acme/shop/commit/0123456789abcdef0123456789abcdef01234567"
+    },
+    "pull_request": {
+      "number": 123,
+      "url": "https://github.com/acme/shop/pull/123",
+      "mode": "merged_pr",
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "merge_commit_sha": "0123456789abcdef0123456789abcdef01234567",
+      "expected_commit_directly_reviewed": false
+    },
+    "reviews": [
+      {
+        "id": 987,
+        "reviewer_id": 1001,
+        "state": "APPROVED",
+        "commit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "url": "https://github.com/acme/shop/pull/123#pullrequestreview-987"
+      }
+    ],
+    "certificate": {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "subject_alternative_name": "https://github.com/acme/shop/.github/workflows/release.yml@refs/heads/main",
+      "build_signer_uri": null,
+      "source_repository_uri": "https://github.com/acme/shop",
+      "source_repository_digest": "0123456789abcdef0123456789abcdef01234567",
+      "source_repository_ref": "refs/heads/main",
+      "build_signer_digest": "89abcdef0123456789abcdef0123456789abcdef",
+      "runner_environment": "github-hosted",
+      "run_invocation_uri": "https://github.com/acme/shop/actions/runs/123456789/attempts/1",
+      "source_repository_identifier": "555"
+    },
+    "attestation": {
+      "predicate_type": "https://slsa.dev/provenance/v1",
+      "subject_digest": "sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+      "verified_timestamps": [
+        {
+          "type": "TimestampAuthority",
+          "uri": "https://timestamp.example",
+          "timestamp": "2026-01-01T00:00:00Z"
+        }
+      ],
+      "transparency_log_ids": ["9876"],
+      "bundle_sha256": "sha256:09a33e41a87abcf3fdb11ade1b6a90e446859d4a07a8358d9a929767d07322e4"
+    },
+    "workflow_run": {
+      "id": 123456789,
+      "attempt": 1,
+      "url": "https://github.com/acme/shop/actions/runs/123456789",
+      "head_sha": "0123456789abcdef0123456789abcdef01234567",
+      "event": "push",
+      "conclusion": "success"
+    },
+    "release_approvals": [
+      {
+        "environment": "production",
+        "approver_id": 2001,
+        "state": "approved"
+      }
+    ],
+    "registry": {
+      "digest": "sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+      "pinned_artifact": "ghcr.io/acme/shop@sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+      "media_type": "application/vnd.oci.image.manifest.v1+json",
+      "manifest_url": "https://ghcr.io/v2/acme/shop/manifests/sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+      "resolved_at": "2026-11-18T12:00:00Z"
+    },
+    "pods": [
+      {
+        "uid": "pod-uid",
+        "name": "shop-api-abc-xyz",
+        "node": "node-1",
+        "container": "api",
+        "image": "ghcr.io/acme/shop:v1.4.0",
+        "image_id": "ghcr.io/acme/shop@sha256:0c987afb70eaca35f5f47da7654ae92d10dc0103f9efd775d370e183301e12d7",
+        "container_id": "containerd://container-1",
+        "ready": true,
+        "phase": "Running",
+        "deletion_timestamp": null,
+        "replicaset": "shop-api-abc",
+        "revision": "3",
+        "digest_relation": "direct",
+        "started_at": "2026-11-18T11:55:00Z"
+      }
+    ],
+    "cosign": null
+  },
+  "evidence_truncation": {},
+  "tools": {
+    "gh": "2.102.0",
+    "crane": "0.20.0",
+    "kubectl": "1.34.0",
+    "cosign": null
+  },
+  "limitations": [
+    "Observation-window evidence only; future tag pulls and concurrent remote changes are not constrained.",
+    "Merged-PR review evidence does not mean the merge commit itself was directly reviewed.",
+    "Historical branch-protection and environment configuration are not reconstructed.",
+    "GitHub approvals are run-level, so only certified run attempt 1 is supported.",
+    "No vulnerability, reproducibility, node-integrity, or post-start filesystem claim.",
+    "A verified signature proves an identity signed evidence, not that the artifact is secure."
+  ]
+}

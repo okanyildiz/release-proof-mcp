@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
 from .report import Reason
 from .request import ISSUER, PREDICATE_TYPE, SHA256_RE, VerificationRequest
@@ -21,6 +21,8 @@ def select_attestation(
     value: Any,
     request: VerificationRequest,
     expected_digest: str,
+    *,
+    bundle_sink: Callable[[bytes | None], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], int, int]:
     if not isinstance(value, list) or not value:
         raise AttestationError(
@@ -35,6 +37,8 @@ def select_attestation(
             certificate, attestation, run_id, attempt = validate_attestation(
                 result, request, expected_digest
             )
+            if bundle_sink is not None:
+                bundle_sink(_bundle_bytes(result))
             return certificate, attestation, run_id, attempt
         except AttestationError as error:
             errors.append(error)
@@ -202,8 +206,21 @@ def validate_attestation(
         "run_invocation_uri": run_uri,
     }
     for key in ("sourceRepositoryIdentifier", "sourceRepositoryOwnerIdentifier"):
-        if key in certificate and isinstance(certificate[key], (str, int)):
-            certificate_evidence[_snake_case(key)] = certificate[key]
+        if key not in certificate:
+            continue
+        value = certificate[key]
+        valid = not isinstance(value, bool) and (
+            (isinstance(value, int) and value > 0)
+            or (isinstance(value, str) and re.fullmatch(r"[1-9][0-9]*", value) is not None)
+        )
+        if not valid:
+            raise AttestationError(
+                Reason(
+                    "ATTESTATION_EVIDENCE_INVALID",
+                    f"Certificate {key} must be a positive integer or canonical decimal string.",
+                )
+            )
+        certificate_evidence[_snake_case(key)] = value
     attestation_evidence = {
         "predicate_type": PREDICATE_TYPE,
         "subject_digest": subject_digest,
@@ -254,16 +271,22 @@ def _transparency_ids(verification: dict[str, Any]) -> list[str]:
     return sorted(set(identifiers))
 
 
-def _bundle_digest(result: dict[str, Any]) -> str | None:
+def _bundle_bytes(result: dict[str, Any]) -> bytes | None:
     attestation = result.get("attestation")
     bundle = attestation.get("bundle") if isinstance(attestation, dict) else None
     if not isinstance(bundle, dict):
         return None
     try:
-        canonical = json.dumps(
+        return json.dumps(
             bundle, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
         ).encode("utf-8")
     except (TypeError, ValueError, UnicodeEncodeError):
+        return None
+
+
+def _bundle_digest(result: dict[str, Any]) -> str | None:
+    canonical = _bundle_bytes(result)
+    if canonical is None:
         return None
     return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
 

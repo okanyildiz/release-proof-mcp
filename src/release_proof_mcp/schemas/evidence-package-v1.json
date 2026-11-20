@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release Proof signed evidence package manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_id", "attachments"],
+  "properties": {
+    "schema_version": {
+      "const": "release-proof-evidence-package/v1"
+    },
+    "receipt_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "attachments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "bundle", "oci"],
+      "properties": {
+        "policy": {
+          "$ref": "#/$defs/policyAttachment"
+        },
+        "bundle": {
+          "$ref": "#/$defs/bundleAttachment"
+        },
+        "oci": {
+          "$ref": "#/$defs/ociAttachment"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "receiptDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_sha256"],
+      "properties": {
+        "schema_version": {
+          "const": "release-proof-evidence-package/v1"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      }
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      }
+    },
+    "policyAttachment": {
+      "allOf": [
+        {"$ref": "#/$defs/attachment"},
+        {
+          "properties": {
+            "path": {"const": "effective-policy.json"},
+            "size": {"maximum": 1048576}
+          }
+        }
+      ]
+    },
+    "bundleAttachment": {
+      "allOf": [
+        {"$ref": "#/$defs/attachment"},
+        {
+          "properties": {
+            "path": {"const": "sigstore-bundle.json"},
+            "size": {"maximum": 8388608}
+          }
+        }
+      ]
+    },
+    "ociAttachment": {
+      "allOf": [
+        {"$ref": "#/$defs/attachment"},
+        {
+          "properties": {
+            "path": {"const": "oci-manifest.json"},
+            "size": {"maximum": 8388608}
+          }
+        }
+      ]
+    }
+  }
+}

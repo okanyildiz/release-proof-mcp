@@ -21,10 +21,10 @@ def test_gh_version_floor_rejected_before_attestation_verification(harness: Harn
 
     report = harness.verify()
 
-    assert check(report, "attestation.verification")["status"] == "failed"
+    assert check(report, "attestation.verification")["status"] == "unknown"
     assert check(report, "attestation.verification")["reason"]["code"] == "GH_VERSION_UNSUPPORTED"
     assert not any(call[:3] == ("gh", "attestation", "verify") for call in harness.runner.calls)
-    assert report["status"] == "failed"
+    assert report["status"] == "unknown"
 
 
 def test_missing_attestation_is_authoritative_failure(harness: Harness) -> None:
@@ -140,7 +140,7 @@ def test_in_toto_subject_must_cover_exact_artifact_digest(harness: Harness) -> N
     [
         ("invalid signature while verifying DSSE", "SIGNATURE_INVALID", "failed"),
         ("invalid timestamp from timestamp authority", "SIGNING_TIME_INVALID", "failed"),
-        ("certificate has expired and no signing time is available", "SIGNING_TIME_UNVERIFIED", "failed"),
+        ("certificate has expired and no signing time is available", "SIGNING_TIME_UNVERIFIED", "unknown"),
         ("unable to fetch trust root from TUF", "TRUST_ROOT_UNAVAILABLE", "unknown"),
         ("dns failure reaching service", "TRUST_ROOT_UNAVAILABLE", "unknown"),
         ("HTTP 403: forbidden", "ATTESTATION_ACCESS_DENIED", "unknown"),
@@ -203,3 +203,49 @@ def test_verifier_argv_uses_digest_never_tag_and_all_policy_flags(harness: Harne
     assert "--deny-self-hosted-runners" in argv
     assert argv[argv.index("--limit") + 1] == "100"
     assert argv[argv.index("--source-ref") + 1] == "refs/heads/main"
+
+
+@pytest.mark.parametrize(
+    "field", ["sourceRepositoryIdentifier", "sourceRepositoryOwnerIdentifier"]
+)
+@pytest.mark.parametrize("value", [None, True, 0, -1, "0555", "not-numeric", 1.5])
+def test_malformed_certificate_repository_ids_are_unknown(
+    harness: Harness, field: str, value: object
+) -> None:
+    harness.set_attestation([attestation_result(**{field: value})])
+
+    report = harness.verify()
+
+    attestation_check = check(report, "attestation.verification")
+    assert attestation_check["status"] == "unknown"
+    assert attestation_check["reason"]["code"] == "ATTESTATION_EVIDENCE_INVALID"
+    assert report["status"] != "verified"
+
+
+@pytest.mark.parametrize(
+    "field", ["sourceRepositoryIdentifier", "sourceRepositoryOwnerIdentifier"]
+)
+def test_malformed_certificate_id_is_not_hidden_when_run_counterpart_is_absent(
+    harness: Harness, field: str
+) -> None:
+    from conftest import run_object
+
+    harness.set_attestation([attestation_result(**{field: {"id": "555"}})])
+    run = run_object()
+    if field == "sourceRepositoryIdentifier":
+        del run["repository"]["id"]
+    harness.set_run(run)
+
+    report = harness.verify()
+
+    assert check(report, "attestation.verification")["status"] == "unknown"
+    assert check(report, "attestation.verification")["reason"]["code"] == "ATTESTATION_EVIDENCE_INVALID"
+    assert report["status"] != "verified"
+
+
+def test_positive_integer_certificate_repository_id_is_valid(harness: Harness) -> None:
+    harness.set_attestation([attestation_result(sourceRepositoryIdentifier=555)])
+
+    report = harness.verify()
+
+    assert report["status"] == "verified"

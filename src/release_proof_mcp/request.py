@@ -12,6 +12,7 @@ IMAGE_SEGMENT_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
 KUBE_NAME_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$")
 POLICY_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+CONSUMER_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
 ISSUER = "https://token.actions.githubusercontent.com"
 PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 
@@ -86,6 +87,7 @@ INPUT_SCHEMA: dict[str, Any] = {
         },
         "workflow": {"type": "string", "pattern": WORKFLOW_RE.pattern},
         "source_ref": {"type": "string", "minLength": 1, "maxLength": 255},
+        "consumer_nonce": {"type": "string", "pattern": CONSUMER_NONCE_RE.pattern},
         "signer_workflow": {"type": "string", "minLength": 1, "maxLength": 512},
         "signer_digest": {"type": "string", "pattern": COMMIT_RE.pattern},
         "kube_context": {"type": "string", "minLength": 1, "maxLength": 255},
@@ -161,6 +163,7 @@ class VerificationRequest:
     deployment: str
     container: str
     expected_run: ExpectedRun | None
+    consumer_nonce: str | None = None
 
     @property
     def certificate_identity(self) -> str:
@@ -190,7 +193,13 @@ class VerificationRequest:
         return self.artifact.pinned(digest)
 
     @classmethod
-    def from_dict(cls, value: Any) -> "VerificationRequest":
+    def from_dict(
+        cls,
+        value: Any,
+        *,
+        signer_workflow_default: str | None = None,
+        signer_digest_default: str | None = None,
+    ) -> "VerificationRequest":
         if not isinstance(value, dict):
             raise ValidationError("Input must be a JSON object.")
         _reject_unknown(value, set(INPUT_SCHEMA["properties"]), "input")
@@ -208,14 +217,18 @@ class VerificationRequest:
             raise ValidationError("source_ref must be an exact refs/heads/... or refs/tags/... ref.")
         artifact = parse_artifact(_string(value, "artifact"))
 
-        signer_workflow = value.get("signer_workflow", f"{repo}/{workflow}")
+        signer_workflow = value.get(
+            "signer_workflow", signer_workflow_default or f"{repo}/{workflow}"
+        )
         if not isinstance(signer_workflow, str):
             raise ValidationError("signer_workflow must be a string.")
         signer_workflow = validate_signer_workflow(signer_workflow)
-        signer_digest = value.get("signer_digest")
-        if signer_digest is not None:
+        if "signer_digest" in value:
+            signer_digest = value["signer_digest"]
             if not isinstance(signer_digest, str) or not COMMIT_RE.fullmatch(signer_digest):
                 raise ValidationError("signer_digest must be a full lowercase commit SHA.")
+        else:
+            signer_digest = signer_digest_default
         signer_repository = "/".join(
             signer_workflow.removeprefix("github.com/").split("/")[:2]
         )
@@ -230,6 +243,11 @@ class VerificationRequest:
         namespace = _string(value, "namespace", KUBE_NAME_RE)
         deployment = _string(value, "deployment", KUBE_NAME_RE)
         container = _string(value, "container", KUBE_NAME_RE)
+        consumer_nonce = (
+            _string(value, "consumer_nonce", CONSUMER_NONCE_RE)
+            if "consumer_nonce" in value
+            else None
+        )
 
         expected_run = None
         if "expected_run" in value:
@@ -261,6 +279,7 @@ class VerificationRequest:
             deployment=deployment,
             container=container,
             expected_run=expected_run,
+            consumer_nonce=consumer_nonce,
         )
 
 

@@ -1,28 +1,56 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "release-proof-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Read-only GitHub Actions, GHCR, and Kubernetes release evidence over MCP"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
-authors = [{name = "release-proof-mcp contributors"}]
-dependencies = []
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Okan YILDIZ"}]
+keywords = ["mcp", "supply-chain", "sigstore", "github-actions", "ghcr", "kubernetes", "release-evidence"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Security",
+  "Topic :: Software Development :: Build Tools",
+]
+dependencies = ["cryptography==50.0.2", "jsonschema==4.26.0"]
+
+[project.urls]
+Homepage = "https://github.com/okanyildiz/release-proof-mcp"
+Repository = "https://github.com/okanyildiz/release-proof-mcp"
+Issues = "https://github.com/okanyildiz/release-proof-mcp/issues"
+Security = "https://github.com/okanyildiz/release-proof-mcp/security/policy"
 
 [project.optional-dependencies]
-test = ["pytest>=8.0,<9.0"]
+test = ["pytest>=8,<9"]
 
 [project.scripts]
 release-proof-mcp = "release_proof_mcp.server:main"
+release-proof-verify = "release_proof_mcp.consumer_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.dynamic]
+version = {attr = "release_proof_mcp.version.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+release_proof_mcp = ["schemas/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers"

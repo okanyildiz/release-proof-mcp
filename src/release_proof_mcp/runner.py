@@ -101,33 +101,44 @@ class ProcessRunner:
         except (FileNotFoundError, PermissionError, OSError) as error:
             raise ToolUnavailable(f"Unable to execute {argv[0]}.") from error
 
-        assert process.stdout is not None
-        assert process.stderr is not None
-        stdout_reader = _BoundedReader(process.stdout, self.output_limit_bytes)
-        stderr_reader = _BoundedReader(process.stderr, self.output_limit_bytes)
-        readers = (stdout_reader, stderr_reader)
-        stdout_thread = threading.Thread(target=stdout_reader.read, daemon=True)
-        stderr_thread = threading.Thread(target=stderr_reader.read, daemon=True)
-        threads = (stdout_thread, stderr_thread)
-        for thread in threads:
-            thread.start()
+        readers: list[_BoundedReader] = []
+        started_threads: list[threading.Thread] = []
         try:
+            assert process.stdout is not None
+            assert process.stderr is not None
+            for stream in (process.stdout, process.stderr):
+                reader = _BoundedReader(stream, self.output_limit_bytes)
+                readers.append(reader)
+                thread = threading.Thread(target=reader.read, daemon=True)
+                thread.start()
+                started_threads.append(thread)
             self._wait_for_exit(process, argv[0], timeout_seconds, cancel_event)
-        except (CommandTimeout, CommandCancelled):
+            if cancel_event is not None and cancel_event.is_set():
+                raise CommandCancelled(f"Command was cancelled: {argv[0]}.")
+            self._finish_readers(
+                process, tuple(started_threads), tuple(readers), argv[0]
+            )
+            stdout_reader, stderr_reader = readers
+            if stdout_reader.truncated or stderr_reader.truncated:
+                raise OutputLimitExceeded(f"Command output exceeded the configured limit: {argv[0]}.")
+            stderr = stderr_reader.data.decode("utf-8", errors="replace")
+            result = CommandResult(
+                returncode=process.returncode,
+                stdout=stdout_reader.data,
+                stderr=redact(stderr, self.environment),
+            )
+            if cancel_event is not None and cancel_event.is_set():
+                raise CommandCancelled(f"Command was cancelled: {argv[0]}.")
+            return result
+        except BaseException:
             self._kill_process_group(process)
-            self._bounded_reap(process)
-            self._finish_readers(process, threads, readers, argv[0])
+            try:
+                self._bounded_reap(process)
+            except Exception:
+                pass
+            self._close_process_streams(process)
+            self._join_readers(tuple(started_threads), 0.05)
             raise
-
-        self._finish_readers(process, threads, readers, argv[0])
-        if stdout_reader.truncated or stderr_reader.truncated:
-            raise OutputLimitExceeded(f"Command output exceeded the configured limit: {argv[0]}.")
-        stderr = stderr_reader.data.decode("utf-8", errors="replace")
-        return CommandResult(
-            returncode=process.returncode,
-            stdout=stdout_reader.data,
-            stderr=redact(stderr, self.environment),
-        )
 
     def _wait_for_exit(
         self,
@@ -164,14 +175,18 @@ class ProcessRunner:
         if self._join_readers(threads, self.reader_timeout_seconds):
             self._check_reader_errors(readers, command)
             return
+        self._close_process_streams(process)
+        self._join_readers(threads, 0.05)
+        raise RunnerError(f"Command output streams did not close within the cleanup deadline: {command}.")
+
+    @staticmethod
+    def _close_process_streams(process: subprocess.Popen[bytes]) -> None:
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 try:
                     os.close(stream.fileno())
                 except (OSError, ValueError):
                     pass
-        self._join_readers(threads, 0.05)
-        raise RunnerError(f"Command output streams did not close within the cleanup deadline: {command}.")
 
     def _bounded_reap(self, process: subprocess.Popen[bytes]) -> None:
         try:
@@ -208,7 +223,7 @@ class ProcessRunner:
             pass
 
     @staticmethod
-    def _join_readers(threads: tuple[threading.Thread, threading.Thread], timeout: float) -> bool:
+    def _join_readers(threads: tuple[threading.Thread, ...], timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         for thread in threads:
             thread.join(timeout=max(0.0, deadline - time.monotonic()))

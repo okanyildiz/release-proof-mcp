@@ -22,7 +22,7 @@ ARTIFACT = "ghcr.io/acme/shop:v1.4.0"
 IMAGE_ID_REPOSITORY = "ghcr.io/acme/shop"
 
 
-def manifest_bytes(media_type: str = "application/vnd.oci.image.manifest.v2+json") -> bytes:
+def manifest_bytes(media_type: str = "application/vnd.oci.image.manifest.v1+json") -> bytes:
     return json.dumps(
         {
             "schemaVersion": 2,
@@ -43,7 +43,7 @@ INDEX = json.dumps(
         "mediaType": "application/vnd.oci.image.index.v1+json",
         "manifests": [
             {
-                "mediaType": "application/vnd.oci.image.manifest.v2+json",
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
                 "digest": CHILD_DIGEST,
                 "size": 123,
                 "platform": {"os": "linux", "architecture": "amd64"},
@@ -111,6 +111,7 @@ def certificate(**overrides: Any) -> dict[str, Any]:
         "subjectAlternativeName": "https://github.com/acme/shop/.github/workflows/release.yml@refs/heads/main",
         "buildSignerDigest": SIGNER_DIGEST,
         "sourceRepositoryURI": "https://github.com/acme/shop",
+        "sourceRepositoryIdentifier": "555",
         "sourceRepositoryDigest": COMMIT,
         "sourceRepositoryRef": "refs/heads/main",
         "runnerEnvironment": "github-hosted",
@@ -367,6 +368,8 @@ class Harness:
         progress: Any | None = None,
         deadline_seconds: float = 120.0,
         monotonic: Any | None = None,
+        verifier_instance_id: str | None = None,
+        build_digest: str | None = None,
     ) -> dict[str, Any]:
         from release_proof_mcp.policy import TrustedPolicy
 
@@ -379,6 +382,8 @@ class Harness:
             self.runner,
             clock=lambda: datetime(2026, 11, 18, 12, 0, 0, tzinfo=timezone.utc),
             deadline_seconds=deadline_seconds,
+            verifier_instance_id=verifier_instance_id,
+            build_digest=build_digest,
             **options,
         )
         return verifier.verify(
@@ -410,6 +415,11 @@ class Harness:
     def set_run(self, value: Any) -> None:
         self.runner.route_json(
             ["gh", "api", f"repos/acme/shop/actions/runs/{RUN_ID}/attempts/{ATTEMPT}"], value
+        )
+
+    def set_current_run(self, value: Any) -> None:
+        self.runner.route_json(
+            ["gh", "api", f"repos/acme/shop/actions/runs/{RUN_ID}"], value
         )
 
     def set_approvals(self, value: Any) -> None:
@@ -481,6 +491,9 @@ def harness() -> Harness:
     runner.route(attestation_argv(request, DIGEST), json.dumps([attestation_result()]))
     runner.route_json(
         ["gh", "api", f"repos/acme/shop/actions/runs/{RUN_ID}/attempts/{ATTEMPT}"], run_object()
+    )
+    runner.route_json(
+        ["gh", "api", f"repos/acme/shop/actions/runs/{RUN_ID}"], run_object()
     )
     runner.route_json(
         ["gh", "api", f"repos/acme/shop/actions/runs/{RUN_ID}/approvals"], approvals_object()

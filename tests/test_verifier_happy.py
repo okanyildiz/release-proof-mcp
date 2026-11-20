@@ -24,11 +24,11 @@ def test_single_platform_direct_image_id_happy_path(harness: Harness) -> None:
     report = harness.verify()
 
     assert report["status"] == "verified"
-    assert report["schema_version"] == "release-deployment-proof/v1"
+    assert report["schema_version"] == "release-deployment-proof/v2"
     assert all(item["status"] == "verified" for item in report["checks"])
     assert report["subject"]["pinned_artifact"] == f"ghcr.io/acme/shop@{DIGEST}"
     assert report["evidence"]["pods"][0]["digest_relation"] == "direct"
-    assert report["evidence"]["pull_request"]["merge_commit_directly_reviewed"] is False
+    assert report["evidence"]["pull_request"]["expected_commit_directly_reviewed"] is False
     assert report["missing_coverage"] == []
     assert report["reasons"] == []
     bundle = attestation_result()["attestation"]["bundle"]
@@ -122,7 +122,7 @@ def test_exact_head_review_mode(harness: Harness) -> None:
     report = harness.verify()
 
     assert report["status"] == "verified"
-    assert report["evidence"]["pull_request"]["merge_commit_directly_reviewed"] is True
+    assert report["evidence"]["pull_request"]["expected_commit_directly_reviewed"] is True
     assert not any("merge commit itself" in item for item in report["limitations"])
 
 

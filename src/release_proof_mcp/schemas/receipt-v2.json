@@ -1,0 +1,694 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Release deployment proof receipt v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "consumer_nonce",
+    "verifier",
+    "status",
+    "summary",
+    "started_at",
+    "completed_at",
+    "subject",
+    "policy_descriptor",
+    "effective_policy",
+    "policy_hash",
+    "checks",
+    "reasons",
+    "missing_coverage",
+    "evidence",
+    "evidence_truncation",
+    "tools",
+    "limitations"
+  ],
+  "allOf": [
+    {
+      "if": {"required": ["proof"]},
+      "then": {"required": ["proof_metadata"]}
+    },
+    {
+      "if": {"required": ["proof_metadata"]},
+      "then": {"required": ["proof"]}
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "release-deployment-proof/v2"
+    },
+    "receipt_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "consumer_nonce": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,128}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verifier": {
+      "$ref": "#/$defs/verifier"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["verified", "failed", "unknown"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "policy_descriptor": {
+      "$ref": "#/$defs/policyDescriptor"
+    },
+    "effective_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "version",
+        "signer_workflow",
+        "signer_digest",
+        "review",
+        "release",
+        "require_cosign_signature"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "signer_workflow": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "signer_digest": {
+          "anyOf": [
+            {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            {"type": "null"}
+          ]
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pull_request",
+            "mode",
+            "min_approvals",
+            "allowed_reviewer_ids",
+            "require_non_author"
+          ],
+          "properties": {
+            "pull_request": {"type": "integer", "minimum": 1},
+            "mode": {"type": "string", "enum": ["exact_head", "merged_pr"]},
+            "min_approvals": {"type": "integer", "minimum": 1},
+            "allowed_reviewer_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "integer", "minimum": 1}
+            },
+            "require_non_author": {"type": "boolean"}
+          }
+        },
+        "release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "event",
+            "environment",
+            "required_approver_ids",
+            "prevent_self_approval"
+          ],
+          "properties": {
+            "event": {"type": "string", "minLength": 1, "maxLength": 100},
+            "environment": {"type": "string", "minLength": 1, "maxLength": 255},
+            "required_approver_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "integer", "minimum": 1}
+            },
+            "prevent_self_approval": {"type": "boolean"}
+          }
+        },
+        "require_cosign_signature": {"type": "boolean"}
+      }
+    },
+    "policy_hash": {
+      "$ref": "#/$defs/sha256Digest"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/aggregatedReason"
+      }
+    },
+    "missing_coverage": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/missingCoverage"
+      }
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidence"
+    },
+    "evidence_truncation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reviews": {
+          "$ref": "#/$defs/truncation"
+        },
+        "release_approvals": {
+          "$ref": "#/$defs/truncation"
+        },
+        "pods": {
+          "$ref": "#/$defs/truncation"
+        }
+      }
+    },
+    "evidence_package": {
+      "$ref": "#/$defs/evidencePackage"
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gh", "crane", "kubectl", "cosign"],
+      "properties": {
+        "gh": {
+          "type": ["string", "null"]
+        },
+        "crane": {
+          "type": ["string", "null"]
+        },
+        "kubectl": {
+          "type": ["string", "null"]
+        },
+        "cosign": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "proof_metadata": {
+      "type": "object",
+      "description": "Proof metadata authenticated inside the in-toto predicate.",
+      "additionalProperties": false,
+      "required": ["issuer", "keyid", "algorithm", "signed_at"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "keyid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "signed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "description": "Optional DSSE Ed25519 proof. Unsigned local receipts omit this field.",
+      "additionalProperties": false,
+      "required": ["issuer", "keyid", "algorithm", "signed_at", "envelope"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "keyid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "signed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "envelope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["payloadType", "payload", "signatures"],
+          "properties": {
+            "payloadType": {
+              "const": "application/vnd.in-toto+json"
+            },
+            "payload": {
+              "type": "string",
+              "minLength": 1
+            },
+            "signatures": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["keyid", "sig"],
+                "properties": {
+                  "keyid": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "sig": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidencePackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_sha256"],
+      "properties": {
+        "schema_version": {
+          "const": "release-proof-evidence-package/v1"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      }
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nullableSha256Digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "githubId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "instance_id", "build_digest"],
+      "properties": {
+        "name": {
+          "const": "release-proof-mcp"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instance_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "build_digest": {
+          "$ref": "#/$defs/nullableSha256Digest"
+        }
+      }
+    },
+    "expectedRun": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "attempt"],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "expected_commit",
+        "artifact_input",
+        "pinned_artifact",
+        "source_ref",
+        "workflow",
+        "expected_run",
+        "source_repository_id",
+        "source_repository_owner_id",
+        "kube_context",
+        "namespace",
+        "deployment",
+        "container"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "expected_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "artifact_input": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 512
+        },
+        "pinned_artifact": {
+          "type": ["string", "null"],
+          "maxLength": 512
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "workflow": {
+          "type": "string",
+          "pattern": "^\\.github/workflows/[A-Za-z0-9_.-]+\\.ya?ml$"
+        },
+        "expected_run": {
+          "$ref": "#/$defs/expectedRun"
+        },
+        "source_repository_id": {
+          "$ref": "#/$defs/githubId"
+        },
+        "source_repository_owner_id": {
+          "$ref": "#/$defs/githubId"
+        },
+        "kube_context": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$",
+          "maxLength": 63
+        },
+        "deployment": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$",
+          "maxLength": 253
+        },
+        "container": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$",
+          "maxLength": 63
+        }
+      }
+    },
+    "policyDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "version", "hash"],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "hash": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": true,
+        "actual": true
+      }
+    },
+    "aggregatedReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check", "code", "message"],
+      "properties": {
+        "check": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": true,
+        "actual": true
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "reason", "evidence"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["verified", "failed", "unknown"]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/reason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "verified"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "$ref": "#/$defs/reason"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "missingCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check", "code"],
+      "properties": {
+        "check": {
+          "type": "string",
+          "minLength": 1
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "pull_request",
+        "reviews",
+        "certificate",
+        "attestation",
+        "workflow_run",
+        "release_approvals",
+        "registry",
+        "pods",
+        "cosign"
+      ],
+      "properties": {
+        "commit": {
+          "type": ["object", "null"]
+        },
+        "pull_request": {
+          "type": ["object", "null"]
+        },
+        "reviews": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object"
+          }
+        },
+        "certificate": {
+          "type": ["object", "null"]
+        },
+        "attestation": {
+          "type": ["object", "null"]
+        },
+        "workflow_run": {
+          "type": ["object", "null"]
+        },
+        "release_approvals": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object"
+          }
+        },
+        "registry": {
+          "type": ["object", "null"]
+        },
+        "pods": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object"
+          }
+        },
+        "cosign": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "truncation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retained", "omitted"],
+      "properties": {
+        "retained": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "omitted": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

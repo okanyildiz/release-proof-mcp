@@ -394,3 +394,106 @@ def test_crane_digest_accepts_one_trailing_newline(harness: Harness) -> None:
     report = harness.verify()
 
     assert report["status"] == "verified"
+
+
+def assert_incomplete_runtime(report: dict) -> None:
+    for name in ("runtime.rollout", "runtime.digest_match", "runtime.stable_observation"):
+        assert check(report, name)["status"] == "unknown"
+    assert report["status"] == "unknown"
+
+
+def test_rollout_requires_every_desired_owned_pod(harness: Harness) -> None:
+    deployment = deployment_object()
+    deployment["spec"]["replicas"] = 2
+    deployment["status"].update({"updatedReplicas": 2, "readyReplicas": 2, "availableReplicas": 2})
+    harness.set_runtime(deployment=deployment, pods={"items": [pod_object()]})
+
+    report = harness.verify()
+
+    assert_incomplete_runtime(report)
+    assert check(report, "runtime.rollout")["reason"]["code"] == "ROLLOUT_INCOMPLETE"
+
+
+def test_rollout_rejects_duplicate_owned_pod_uids(harness: Harness) -> None:
+    deployment = deployment_object()
+    deployment["spec"]["replicas"] = 2
+    deployment["status"].update({"updatedReplicas": 2, "readyReplicas": 2, "availableReplicas": 2})
+    pod = pod_object()
+    harness.set_runtime(deployment=deployment, pods={"items": [pod, copy.deepcopy(pod)]})
+
+    report = harness.verify()
+
+    assert_incomplete_runtime(report)
+
+
+def test_missing_container_id_invalidates_all_runtime_proof(harness: Harness) -> None:
+    pod = pod_object()
+    del pod["status"]["containerStatuses"][0]["containerID"]
+    harness.set_runtime(pods={"items": [pod]})
+
+    report = harness.verify()
+
+    assert_incomplete_runtime(report)
+
+
+@pytest.mark.parametrize("mutation", ["deployment_missing", "replicaset_missing", "mismatched"])
+def test_rollout_revisions_must_be_present_and_consistent(harness: Harness, mutation: str) -> None:
+    deployment = deployment_object()
+    replicaset = replicaset_object()
+    if mutation == "deployment_missing":
+        del deployment["metadata"]["annotations"]["deployment.kubernetes.io/revision"]
+    elif mutation == "replicaset_missing":
+        del replicaset["metadata"]["annotations"]["deployment.kubernetes.io/revision"]
+    else:
+        replicaset["metadata"]["annotations"]["deployment.kubernetes.io/revision"] = "2"
+    harness.set_runtime(deployment=deployment, replicasets={"items": [replicaset]})
+
+    report = harness.verify()
+
+    assert_incomplete_runtime(report)
+
+
+@pytest.mark.parametrize("mutation", ["missing_revision", "missing_container_id", "missing_pod"])
+def test_conclusive_digest_mismatch_precedes_incomplete_observation(
+    harness: Harness, mutation: str
+) -> None:
+    deployment = deployment_object()
+    replicaset = replicaset_object()
+    pod = pod_object(f"ghcr.io/acme/shop@sha256:{'a' * 64}")
+    if mutation == "missing_revision":
+        del replicaset["metadata"]["annotations"]["deployment.kubernetes.io/revision"]
+    elif mutation == "missing_container_id":
+        del pod["status"]["containerStatuses"][0]["containerID"]
+    else:
+        deployment["spec"]["replicas"] = 2
+        deployment["status"].update({"updatedReplicas": 2, "readyReplicas": 2, "availableReplicas": 2})
+    harness.set_runtime(
+        deployment=deployment,
+        replicasets={"items": [replicaset]},
+        pods={"items": [pod]},
+    )
+
+    report = harness.verify()
+
+    digest_check = check(report, "runtime.digest_match")
+    assert digest_check["status"] == "failed"
+    assert digest_check["reason"]["code"] == "TAG_MOVED"
+    assert report["evidence"]["pods"][0]["digest_relation"] == "mismatch"
+    assert report["status"] == "failed"
+
+
+@pytest.mark.parametrize("observed_generation", [True, 1.0, "1", 0])
+def test_observed_generation_requires_positive_non_bool_int(
+    harness: Harness, observed_generation: object
+) -> None:
+    deployment = deployment_object()
+    deployment["metadata"]["generation"] = 1
+    deployment["status"]["observedGeneration"] = observed_generation
+    harness.set_runtime(deployment=deployment)
+
+    report = harness.verify()
+
+    rollout_check = check(report, "runtime.rollout")
+    assert rollout_check["status"] == "unknown"
+    assert rollout_check["reason"]["code"] == "ROLLOUT_INCOMPLETE"
+    assert report["status"] != "verified"
