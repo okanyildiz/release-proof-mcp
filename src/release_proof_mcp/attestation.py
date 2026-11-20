@@ -225,7 +225,7 @@ def validate_attestation(
         "predicate_type": PREDICATE_TYPE,
         "subject_digest": subject_digest,
         "verified_timestamps": _timestamp_evidence(verification.get("verifiedTimestamps")),
-        "transparency_log_ids": _transparency_ids(verification),
+        "transparency_log_ids": _transparency_ids(result),
         "bundle_sha256": _bundle_digest(result),
     }
     return certificate_evidence, attestation_evidence, run_id, attempt
@@ -255,10 +255,24 @@ def _timestamp_evidence(value: Any) -> list[dict[str, Any]]:
     return evidence
 
 
-def _transparency_ids(verification: dict[str, Any]) -> list[str]:
-    entries = verification.get("transparencyLogEntries")
-    if not isinstance(entries, list):
+def _transparency_ids(result: dict[str, Any]) -> list[str]:
+    if not isinstance(result, dict):
         return []
+    verification = result.get("verificationResult")
+    verification = verification if isinstance(verification, dict) else {}
+    entries = []
+    legacy = verification.get("transparencyLogEntries")
+    if isinstance(legacy, list):
+        entries.extend(legacy)
+    attestation = result.get("attestation")
+    attestation = attestation if isinstance(attestation, dict) else {}
+    bundle = attestation.get("bundle")
+    bundle = bundle if isinstance(bundle, dict) else {}
+    material = bundle.get("verificationMaterial")
+    material = material if isinstance(material, dict) else {}
+    bundled = material.get("tlogEntries")
+    if isinstance(bundled, list):
+        entries.extend(bundled)
     identifiers = []
     for entry in entries:
         if not isinstance(entry, dict):

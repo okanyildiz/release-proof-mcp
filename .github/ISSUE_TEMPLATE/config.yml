@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Usage guide
+    url: https://github.com/okanyildiz/release-proof-mcp/blob/main/GUIDE.md
+    about: Read the producer, signing, package, and offline consumer guide first.
+  - name: Security policy
+    url: https://github.com/okanyildiz/release-proof-mcp/security/policy
+    about: Use private vulnerability reporting for suspected vulnerabilities, not a public issue.
+  - name: Contribution guide
+    url: https://github.com/okanyildiz/release-proof-mcp/blob/main/CONTRIBUTING.md
+    about: Review test, evidence-labeling, and security requirements before contributing.

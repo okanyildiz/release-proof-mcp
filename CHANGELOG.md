@@ -2,10 +2,21 @@
 
 ## 0.1.2 - Unreleased
 
+### Added
+
+- Add a code of conduct, issue templates for bugs/evidence mismatches/live results, and a security-focused pull request template.
+- Record real fixture evidence that same-repository non-reusable signers use the source commit as `buildSignerDigest`. The same-repository trusted-policy example uses `signer_digest: null`, while caller JSON examples omit the field.
+
 ### Fixed
 
 - Exclude owned terminal Pods in `Failed` or `Succeeded` phase from active rollout, digest reconciliation, and stability fingerprints while recording `evidence.excluded_terminal_pods`. Running-to-terminal transitions still produce `RUNTIME_CHANGED_DURING_VERIFICATION`.
 - Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code. Probe failures preserve their actual reason across source, attestation, workflow, and approval checks and skip attestation retrieval. Repository names are compared case-insensitively, and Cosign uses the same denial/rate-limit/service-error mapping. Exact plain `gh: HTTP NNN` lines are classified by status without matching substrings in SHAs or V12 identifiers.
+- Read transparency log identifiers from both the legacy verification result and `attestation.bundle.verificationMaterial.tlogEntries`, matching real `gh attestation verify` output.
+- Remove the stale no-runtime-dependencies file and correct repository wording, Windows validation limits, live example signer configuration, and documentation punctuation.
+
+### Release evidence notes
+
+- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their `SHA256SUMS.txt` files provide integrity checks, not GitHub build-provenance attestations.
 
 ## 0.1.1 - 2026-11-20
 
