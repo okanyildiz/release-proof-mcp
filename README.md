@@ -561,6 +561,10 @@ A dedicated fixture produced a real `verified` result across reviewed PR evidenc
 
 The exact identities, digests, outcomes, tool versions, and limitations are recorded in [live interoperability evidence](docs/live-validation-2026-11-18.md). This is a single-operator fixture, not independent organizational review, production key custody, a provider/runtime matrix, or enterprise-readiness evidence.
 
+### Live five-file package validation, 2026-11-20
+
+A second dedicated run exercised development version `0.1.1` through real stdio MCP, private GHCR, the existing reviewed and approved initial run, a fresh two-Pod kind Deployment, real OpenBao Transit signing, and a five-file package export. The credential-free independent consumer returned `OK`; attachment tampering returned `ATTACHMENT_METADATA_MISMATCH`, a wrong nonce returned `NONCE_MISMATCH`, and descriptor-only input returned `PACKAGE_REQUIRED`. Both opt-in live tests passed separately. Exact identities, package hashes, local matrix results, and limits are recorded in [local live evidence-package validation](docs/live-validation-2026-11-20.md).
+
 ### Optional live provider smoke test
 
 Run this only against a dedicated repository, GHCR image, and test cluster after replacing every example value. Configure credentials outside the command and policy file. The test calls the real verifier and asserts a `verified` result.
@@ -577,7 +581,7 @@ The optional test is the reproduction path for a new dedicated environment; the 
 
 ## Known limitations
 
-- **Live evidence is limited to the recorded fixture.** The dedicated single-operator GitHub/GHCR/kind/OpenBao path succeeded, but the five-file package has not been exported and consumed in a new live run. Deterministic and clean-wheel package tests do not close that gap. There is no provider/runtime matrix, Cosign result, production cluster result, or independent organizational adoption evidence.
+- **Live evidence is limited to two dedicated single-operator fixtures.** The 2026-11-18 run validated the provider path and standalone signed receipt. The 2026-11-20 run added a real private-GHCR, kind, stdio MCP, OpenBao five-file package export and independent consumer allow/deny. There is still no provider/runtime matrix, Cosign result, production cluster result, native Windows result, hosted CI result, release-artifact attestation, or independent organizational adoption evidence.
 - **Signed consumption does not remove producer trust.** The consumer validates retained evidence but does not requery upstream providers or reconstruct desired replica counts. A receipt alone does not retain the complete OCI index child list; a package binds the exact index bytes but still relies on the producer's accepted live observations.
 - **Freshness is not one-time replay prevention.** Nonce and age checks require caller-side challenge discipline; the consumer has no replay cache.
 - **Production key operations and remote evidence distribution remain open.** The OpenBao adapter, local package export, and real development integration work, but production TLS, HSM backing, HA, sealing, audit operations, managed-cloud KMS, and authenticated remote package distribution are not implemented or validated.

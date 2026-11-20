@@ -184,7 +184,7 @@ class ProcessRunner:
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 try:
-                    os.close(stream.fileno())
+                    stream.close()
                 except (OSError, ValueError):
                     pass
 

@@ -124,6 +124,8 @@ def test_second_reader_start_failure_cleans_up_started_resources(
     assert len(started_threads) == 1
     assert not started_threads[0].is_alive()
     assert processes[0].returncode is not None
+    assert processes[0].stdout is not None and processes[0].stdout.closed
+    assert processes[0].stderr is not None and processes[0].stderr.closed
 
 
 def test_unexpected_wait_failure_kills_and_cleans_up_readers(

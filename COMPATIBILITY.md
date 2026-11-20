@@ -2,7 +2,7 @@
 
 ## Independent version contracts
 
-- Package: `release-proof-mcp` uses Semantic Versioning (SemVer) and the current release is `0.1.0`. `release_proof_mcp.__version__`, package metadata, and MCP `serverInfo.version` share the package version.
+- Package: `release-proof-mcp` uses Semantic Versioning (SemVer). The current release is `0.1.0` and the development version is `0.1.1`. `release_proof_mcp.__version__`, package metadata, and MCP `serverInfo.version` share the package version.
 - MCP protocol: `2025-06-18`, versioned independently of the package and evidence contracts.
 - Policy: `release-proof-policy/v1`, versioned independently.
 - Receipt: `release-deployment-proof/v2`, implemented and emitted. Unsigned local receipts are the default; configured MCP signing adds an in-toto Statement and DSSE Ed25519 proof. The [v2 JSON Schema](src/release_proof_mcp/schemas/receipt-v2.json) defines the concrete shape, and the [sanitized golden receipt](tests/fixtures/receipt-v2.golden.json) illustrates it.
@@ -38,4 +38,4 @@ The exact `cryptography==50.0.2` and `jsonschema==4.26.0` pins are interim until
 
 ## Provider and enterprise status
 
-A single-operator live fixture is recorded in `docs/live-validation-2026-11-18.md`: reviewed PR evidence, approved initial Actions run, GHCR, kind/Kubernetes, OpenBao Transit signing, and independent consumer allow/deny. This is not a provider/runtime matrix, independent organizational adoption, production key custody, or broad enterprise-readiness claim. Local signed evidence-package export and offline verification are implemented; remote package distribution, authenticated isolated remote cells, nonblocking output, and high availability remain separate unimplemented work. Production TLS, HSM/key custody, audit, sealing, and managed-cloud KMS remain unvalidated.
+Two single-operator live records are available. `docs/live-validation-2026-11-18.md` covers the provider path and standalone signed receipt; `docs/live-validation-2026-11-20.md` adds a real private-GHCR, kind, stdio MCP, OpenBao five-file package export and independent consumer allow/deny run. These are not a provider/runtime matrix, independent organizational adoption, production key custody, or broad enterprise-readiness claim. Remote package distribution, authenticated isolated remote cells, nonblocking output, and high availability remain separate unimplemented work. Production TLS, HSM/key custody, audit, sealing, and managed-cloud KMS remain unvalidated.
