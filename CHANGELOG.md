@@ -19,6 +19,7 @@
 - Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX, drain available pipe chunks with `read1`, and use a kill-on-close Windows Job Object assigned before the new process resumes so descendants cannot retain output pipes after their parent exits.
 - Verify the complete Linux, macOS, and Windows matrix on Python 3.11 through 3.13 in hosted CI, including real Windows descendant termination after normal parent exit and startup-failure cleanup without payload execution.
 - Isolate capture tests from ambient signing configuration, prohibit infrastructure access in the demo isolation test, and verify that package-signing failures expose no secret-bearing error text or partial package.
+- Exclude owned terminal Pods in `Failed` or `Succeeded` phase from active rollout, digest reconciliation, and stability fingerprints while recording `evidence.excluded_terminal_pods`. Running-to-terminal transitions still produce `RUNTIME_CHANGED_DURING_VERIFICATION`.
 
 ## 0.1.1 - 2026-11-20
 

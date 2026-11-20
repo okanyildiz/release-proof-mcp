@@ -669,6 +669,10 @@
             "type": "object"
           }
         },
+        "excluded_terminal_pods": {
+          "type": "integer",
+          "minimum": 0
+        },
         "cosign": {
           "type": ["object", "null"]
         }
