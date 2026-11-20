@@ -89,7 +89,7 @@ GitHub.com and GHCR are the only supported services in this version.
 
 ### 1. Install
 
-With access to the repository:
+Clone the repository:
 
 ```sh
 git clone https://github.com/okanyildiz/release-proof-mcp.git
@@ -110,7 +110,7 @@ Save the following as `/secure/config/release-policy.json`, replacing every exam
     "production": {
       "version": "2026-11-18.1",
       "signer_workflow": "acme/shop/.github/workflows/release.yml",
-      "signer_digest": "89abcdef0123456789abcdef0123456789abcdef",
+      "signer_digest": null,
       "review": {
         "pull_request": 123,
         "mode": "merged_pr",
@@ -555,7 +555,7 @@ Real MCP client calls succeeded at the protocol/tool level with Kimi Code 2.3.3 
 
 This verifies the client initialization, protocol/tool invocation, and receipt-return path only. It is not evidence of a successful live GitHub/GHCR/Kubernetes release, and the installed `gh` did not meet the required 2.102.0 floor.
 
-### Dedicated live vertical slice — verified
+### Dedicated live vertical slice - verified
 
 A dedicated fixture produced a real `verified` result across reviewed PR evidence, an approved initial GitHub Actions run, GHCR attestation, and a two-Pod kind deployment. The same receipt was signed through real OpenBao Transit and accepted by the independent consumer. Tampering returned `RECEIPT_INVALID`, a wrong nonce returned `NONCE_MISMATCH`, and a wrong container returned `CONTAINER_NOT_FOUND`.
 
@@ -573,7 +573,7 @@ Run this only against a dedicated repository, GHCR image, and test cluster after
 export RELEASE_PROOF_LIVE_SMOKE=1
 export RELEASE_PROOF_POLICY_FILE=/secure/config/release-policy.json
 export RELEASE_PROOF_POLICY_PROFILE=production
-export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","signer_digest":"89abcdef0123456789abcdef0123456789abcdef","kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
+export RELEASE_PROOF_LIVE_INPUT='{"repo":"acme/shop","expected_commit":"0123456789abcdef0123456789abcdef01234567","artifact":"ghcr.io/acme/shop:v1.4.0","workflow":".github/workflows/release.yml","source_ref":"refs/heads/main","signer_workflow":"acme/shop/.github/workflows/release.yml","signer_digest":null,"kube_context":"production","namespace":"production","deployment":"shop-api","container":"api","expected_run":{"id":123456789,"attempt":1}}'
 python -m pytest -q -m live tests/test_live_smoke.py
 ```
 
@@ -585,7 +585,7 @@ The optional test is the reproduction path for a new dedicated environment; the 
 - **Signed consumption does not remove producer trust.** The consumer validates retained evidence but does not requery upstream providers or reconstruct desired replica counts. A receipt alone does not retain the complete OCI index child list; a package binds the exact index bytes but still relies on the producer's accepted live observations.
 - **Freshness is not one-time replay prevention.** Nonce and age checks require caller-side challenge discipline; the consumer has no replay cache.
 - **Production key operations and remote evidence distribution remain open.** The OpenBao adapter, local package export, and real development integration work, but production TLS, HSM backing, HA, sealing, audit operations, managed-cloud KMS, and authenticated remote package distribution are not implemented or validated.
-- **Windows process-tree cleanup needs platform validation.** The runner has a separate Windows `CREATE_NEW_PROCESS_GROUP` and `taskkill /T /F` path. The local process-tree tests exercise real subprocesses, but this macOS run does not establish Windows behavior.
+- **Windows process-tree cleanup needs platform validation.** The runner has a separate Windows `CREATE_NEW_PROCESS_GROUP` and `taskkill /T /F` path. Local macOS and Docker Linux process tests do not establish native Windows behavior; a real Windows runner is still required.
 - **Approvals are not attempt-bound.** GitHub's approval history is run-level. Only certified run attempt 1 is supported, and the current run attempt must still be 1 when approval is evaluated; reruns fail with `RUN_ATTEMPT_UNSUPPORTED` rather than inheriting an approval.
 - **Stdout backpressure can impede responsiveness.** Writes and flushes block while `_write_lock` is held, so a stalled client pipe can delay other output. Cancellation is cooperative. Use `serve()` for supported stdio concurrency; direct concurrent in-process `handle()` calls are not a supported substitute.
 - **No admission control or continuous enforcement.** The receipt covers an observation window, and the consumer returns a decision without mutating or blocking workloads. Neither constrains later changes or future Pod image pulls.
@@ -647,7 +647,7 @@ No. It observes and reports evidence but does not mutate or block workloads. Kee
 Contributions are welcome through a focused, tested pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the PR process, and the security-sensitive review checklist.
 
 - Use [GitHub Issues](https://github.com/okanyildiz/release-proof-mcp/issues) for bugs, reproducible evidence mismatches, documentation corrections, and live-integration results.
-- GitHub Discussions is not currently enabled for this private repository. Use an issue for design questions until a discussions area is available.
+- GitHub Discussions is not currently enabled for this repository. Use an issue for design questions until a discussions area is available.
 - Do not disclose a suspected vulnerability in a public issue. Follow [SECURITY.md](SECURITY.md).
 - Never attach live tokens, kubeconfig contents, registry credentials, approval comments, or sensitive production receipts.
 

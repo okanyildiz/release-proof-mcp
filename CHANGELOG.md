@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add a code of conduct, issue templates for bugs/evidence mismatches/live results, and a security-focused pull request template.
+- Record real fixture evidence that same-repository non-reusable signers use the source commit as `buildSignerDigest`; same-repository examples now use `signer_digest: null`.
+
+### Fixed
+
+- Read transparency log identifiers from both the legacy verification result and `attestation.bundle.verificationMaterial.tlogEntries`, matching real `gh attestation verify` output.
+- Remove the stale no-runtime-dependencies file and correct repository wording, Windows validation limits, live example signer configuration, and documentation punctuation.
+
+### Release evidence notes
+
+- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their `SHA256SUMS.txt` files provide integrity checks, not GitHub build-provenance attestations.
+
 ## 0.1.1 - 2026-11-20
 
 ### Added
