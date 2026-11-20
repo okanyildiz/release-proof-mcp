@@ -236,7 +236,7 @@ def test_real_process_uses_no_shell(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "Popen", spy)
     result = ProcessRunner(environment={}).run([sys.executable, "-c", "print('ok')"])
 
-    assert result.stdout == b"ok\n"
+    assert result.stdout == b"ok" + os.linesep.encode("ascii")
     assert captured["shell"] is False
 
 
@@ -262,9 +262,15 @@ def test_all_tool_version_stdout_is_redacted_with_real_process_runner(
         "cosign": f"print({payload!r})",
     }
     for name, body in scripts.items():
-        executable = bin_dir / name
-        executable.write_text(f"#!{sys.executable}\n{body}\n")
-        executable.chmod(0o700)
+        if os.name == "nt":
+            executable = bin_dir / f"{name}.bat"
+            executable.write_text(
+                "@echo off\r\n" + subprocess.list2cmdline([sys.executable, "-c", body]) + "\r\n"
+            )
+        else:
+            executable = bin_dir / name
+            executable.write_text(f"#!{sys.executable}\n{body}\n")
+            executable.chmod(0o700)
     runner = ProcessRunner(
         environment={"PATH": str(bin_dir), "GH_TOKEN": "env-secret"},
         timeout_seconds=2,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -357,6 +358,7 @@ def test_environment_file_key_signs_with_configured_identity(
     )
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX mode bits are not enforced on Windows")
 def test_environment_file_key_rejects_group_or_other_permissions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,6 +1,6 @@
 <h1 align="center">
   <a href="https://modelcontextprotocol.io">
-    <img src="assets/banner.svg" alt="Release Proof MCP - prove production bytes from reviewed commits" width="100%">
+    <img src="assets/banner.svg" alt="Release Proof MCP - from reviewed commit to verifiable deployment evidence" width="100%">
   </a>
 </h1>
 
@@ -98,6 +98,19 @@ python3.11 -m venv .venv
 . .venv/bin/activate
 pip install .
 ```
+
+### Verify release artifacts
+
+For releases produced by `.github/workflows/release.yml`, starting with `v0.1.2`, download the wheel, sdist, and `SHA256SUMS.txt`, then verify the build provenance and checksums:
+
+```sh
+gh release download v0.1.2
+gh attestation verify release_proof_mcp-0.1.2-py3-none-any.whl --repo okanyildiz/release-proof-mcp
+gh attestation verify release_proof_mcp-0.1.2.tar.gz --repo okanyildiz/release-proof-mcp
+sha256sum -c SHA256SUMS.txt
+```
+
+On macOS, `shasum -a 256 -c SHA256SUMS.txt` is equivalent. The `0.1.0` and `0.1.1` artifacts were built locally and are unattested; their checksums provide integrity checks, not GitHub build-provenance evidence. No PyPI publication is claimed.
 
 ### 2. Configure a trusted server-side policy
 

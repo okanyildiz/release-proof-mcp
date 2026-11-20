@@ -6,6 +6,11 @@
 
 - Add a code of conduct, issue templates for bugs/evidence mismatches/live results, and a security-focused pull request template.
 - Record real fixture evidence that same-repository non-reusable signers use the source commit as `buildSignerDigest`. The same-repository trusted-policy example uses `signer_digest: null`, while caller JSON examples omit the field.
+- Generate and verify `SHA256SUMS.txt` in the release workflow and document `gh attestation verify` for workflow-produced release artifacts.
+
+### Changed
+
+- Replace the banner tagline with "From reviewed commit to verifiable deployment evidence."
 
 ### Fixed
 
@@ -13,10 +18,13 @@
 - Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code. Probe failures preserve their actual reason across source, attestation, workflow, and approval checks and skip attestation retrieval. Repository names are compared case-insensitively, and Cosign uses the same denial/rate-limit/service-error mapping. Exact plain `gh: HTTP NNN` lines are classified by status without matching substrings in SHAs or V12 identifiers.
 - Read transparency log identifiers from both the legacy verification result and `attestation.bundle.verificationMaterial.tlogEntries`, matching real `gh attestation verify` output.
 - Remove the stale no-runtime-dependencies file and correct repository wording, Windows validation limits, live example signer configuration, and documentation punctuation.
+- Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX platforms while preserving no-overwrite package publication. Use platform-native access controls elsewhere.
+- Close Windows subprocess stream objects during forced cleanup and fall back to `process.kill()` when `taskkill` fails.
+- Make tool-version, line-ending, and POSIX permission tests platform-aware.
 
 ### Release evidence notes
 
-- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their `SHA256SUMS.txt` files provide integrity checks, not GitHub build-provenance attestations.
+- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their checksum files provide integrity checks, not GitHub build-provenance attestations. The first workflow-built public release is planned for `0.1.2`.
 
 ## 0.1.1 - 2026-11-20
 

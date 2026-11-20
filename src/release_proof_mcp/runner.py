@@ -191,7 +191,10 @@ class ProcessRunner:
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 try:
-                    os.close(stream.fileno())
+                    if os.name == "nt":
+                        stream.close()
+                    else:
+                        os.close(stream.fileno())
                 except (OSError, ValueError):
                     pass
 
@@ -212,7 +215,7 @@ class ProcessRunner:
                 pass
         elif os.name == "nt":
             try:
-                subprocess.run(
+                completed = subprocess.run(
                     ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
@@ -221,7 +224,8 @@ class ProcessRunner:
                     check=False,
                     shell=False,
                 )
-                return
+                if completed.returncode == 0:
+                    return
             except (OSError, subprocess.TimeoutExpired):
                 pass
         try:
