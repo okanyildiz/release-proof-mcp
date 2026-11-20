@@ -13,7 +13,7 @@
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.0-a78bfa?style=for-the-badge" alt="Release version 0.1.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.1-a78bfa?style=for-the-badge" alt="Release version 0.1.1"></a>
 </p>
 
 <p align="center">

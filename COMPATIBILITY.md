@@ -2,7 +2,7 @@
 
 ## Independent version contracts
 
-- Package: `release-proof-mcp` uses Semantic Versioning (SemVer). The current release is `0.1.0` and the development version is `0.1.1`. `release_proof_mcp.__version__`, package metadata, and MCP `serverInfo.version` share the package version.
+- Package: `release-proof-mcp` uses Semantic Versioning (SemVer) and the current release is `0.1.1`. `release_proof_mcp.__version__`, package metadata, and MCP `serverInfo.version` share the package version.
 - MCP protocol: `2025-06-18`, versioned independently of the package and evidence contracts.
 - Policy: `release-proof-policy/v1`, versioned independently.
 - Receipt: `release-deployment-proof/v2`, implemented and emitted. Unsigned local receipts are the default; configured MCP signing adds an in-toto Statement and DSSE Ed25519 proof. The [v2 JSON Schema](src/release_proof_mcp/schemas/receipt-v2.json) defines the concrete shape, and the [sanitized golden receipt](tests/fixtures/receipt-v2.golden.json) illustrates it.
