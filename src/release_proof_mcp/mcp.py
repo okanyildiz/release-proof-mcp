@@ -14,6 +14,7 @@ from .evidence_package import export_evidence_package
 from .version import __version__
 from .policy import PolicyConfigurationError, PolicyStore
 from .request import INPUT_SCHEMA, ValidationError, VerificationRequest
+from .strict_json import strict_json_loads
 from .signers.openbao import (
     DEFAULT_OPENBAO_TIMEOUT_SECONDS,
     OpenBaoTransitSigner,
@@ -370,10 +371,8 @@ class MCPServer:
                 if not line.strip():
                     continue
                 try:
-                    message = json.loads(
-                        line.decode("utf-8"), parse_constant=_reject_json_constant
-                    )
-                except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError):
+                    message = strict_json_loads(line)
+                except ValueError:
                     self._write(output_stream, _error(None, -32700, "Parse error"))
                     continue
                 if (
@@ -669,10 +668,6 @@ def _progress_token(params: dict[str, Any]) -> str | int | None:
         if token_size > 256:
             raise ValidationError("_meta progressToken exceeds 256 UTF-8 bytes")
     return token
-
-
-def _reject_json_constant(value: str) -> Any:
-    raise ValueError(f"Non-finite JSON number is not allowed: {value}")
 
 
 def _result(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:

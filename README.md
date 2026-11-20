@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-775%20passed-14b8a6?style=for-the-badge" alt="Tests: 775 passed"></a>
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-776%20passed-14b8a6?style=for-the-badge" alt="Tests: 776 passed"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
-  <a href="pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.0-a78bfa?style=for-the-badge" alt="Release version 0.1.0"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.1-a78bfa?style=for-the-badge" alt="Release version 0.1.1"></a>
 </p>
 
 <p align="center">
@@ -529,7 +529,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **775 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
+The current offline suite reports **776 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
 python -m pip install '.[test]'
@@ -561,6 +561,10 @@ A dedicated fixture produced a real `verified` result across reviewed PR evidenc
 
 The exact identities, digests, outcomes, tool versions, and limitations are recorded in [live interoperability evidence](docs/live-validation-2026-11-18.md). This is a single-operator fixture, not independent organizational review, production key custody, a provider/runtime matrix, or enterprise-readiness evidence.
 
+### Live five-file package validation, 2026-11-20
+
+A second dedicated run exercised development version `0.1.1` through real stdio MCP, private GHCR, the existing reviewed and approved initial run, a fresh two-Pod kind Deployment, real OpenBao Transit signing, and a five-file package export. The credential-free independent consumer returned `OK`; attachment tampering returned `ATTACHMENT_METADATA_MISMATCH`, a wrong nonce returned `NONCE_MISMATCH`, and descriptor-only input returned `PACKAGE_REQUIRED`. Both opt-in live tests passed separately. Exact identities, package hashes, local matrix results, and limits are recorded in [local live evidence-package validation](docs/live-validation-2026-11-20.md).
+
 ### Optional live provider smoke test
 
 Run this only against a dedicated repository, GHCR image, and test cluster after replacing every example value. Configure credentials outside the command and policy file. The test calls the real verifier and asserts a `verified` result.
@@ -577,7 +581,7 @@ The optional test is the reproduction path for a new dedicated environment; the 
 
 ## Known limitations
 
-- **Live evidence is limited to the recorded fixture.** The dedicated single-operator GitHub/GHCR/kind/OpenBao path succeeded, but the five-file package has not been exported and consumed in a new live run. Deterministic and clean-wheel package tests do not close that gap. There is no provider/runtime matrix, Cosign result, production cluster result, or independent organizational adoption evidence.
+- **Live evidence is limited to two dedicated single-operator fixtures.** The 2026-11-18 run validated the provider path and standalone signed receipt. The 2026-11-20 run added a real private-GHCR, kind, stdio MCP, OpenBao five-file package export and independent consumer allow/deny. There is still no provider/runtime matrix, Cosign result, production cluster result, native Windows result, hosted CI result, release-artifact attestation, or independent organizational adoption evidence.
 - **Signed consumption does not remove producer trust.** The consumer validates retained evidence but does not requery upstream providers or reconstruct desired replica counts. A receipt alone does not retain the complete OCI index child list; a package binds the exact index bytes but still relies on the producer's accepted live observations.
 - **Freshness is not one-time replay prevention.** Nonce and age checks require caller-side challenge discipline; the consumer has no replay cache.
 - **Production key operations and remote evidence distribution remain open.** The OpenBao adapter, local package export, and real development integration work, but production TLS, HSM backing, HA, sealing, audit operations, managed-cloud KMS, and authenticated remote package distribution are not implemented or validated.
