@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import shutil
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,13 +20,21 @@ from .capture import (
 )
 from .consumer import load_strict_json_file, read_bounded_file
 from .demo import run_demo
+from .evidence_package import PACKAGE_FILENAMES
 from .mcp import _environment_signing_configuration
 from .policy import PolicyStore
+from .receipt_validation import canonical_json_bytes
 from .signing import sign_receipt
 
 
 class _UsageError(Exception):
     pass
+
+
+class _OutputError(Exception):
+    def __init__(self, package_path: Path | None) -> None:
+        super().__init__(str(package_path))
+        self.package_path = package_path
 
 
 class _Parser(argparse.ArgumentParser):
@@ -96,8 +107,46 @@ def _emit(captured: CaptureResult, out: str | None) -> None:
     if out is not None:
         _write_new_output(out, encoded)
     else:
-        sys.stdout.buffer.write(encoded)
+        written = sys.stdout.buffer.write(encoded)
+        if written != len(encoded):
+            raise OSError("Receipt output was incomplete")
         sys.stdout.buffer.flush()
+
+
+def _rollback_package(
+    captured: CaptureResult,
+    package_root: str | None,
+    root_preexisting: bool,
+) -> None:
+    if package_root is None or "evidence_package" not in captured.receipt:
+        return
+    root = Path(package_root)
+    receipt_id = captured.receipt["receipt_id"]
+    if str(uuid.UUID(receipt_id)) != receipt_id:
+        raise ValueError("Published package identity is invalid")
+    package = root / receipt_id
+    if not os.path.lexists(package):
+        return
+    if (
+        root.is_symlink()
+        or package.is_symlink()
+        or not root.is_dir()
+        or not package.is_dir()
+    ):
+        raise ValueError("Published package path is not a real directory")
+    if set(os.listdir(package)) != PACKAGE_FILENAMES:
+        raise ValueError("Published package file set changed")
+    if read_bounded_file(package / "receipt.json") != canonical_json_bytes(captured.receipt):
+        raise ValueError("Published package receipt changed")
+    manifest = json.loads(read_bounded_file(package / "manifest.json"))
+    if not isinstance(manifest, dict) or manifest.get("receipt_id") != receipt_id:
+        raise ValueError("Published package manifest changed")
+    shutil.rmtree(package)
+    if not root_preexisting:
+        try:
+            root.rmdir()
+        except OSError:
+            pass
 
 
 def _run_capture(
@@ -116,6 +165,7 @@ def _run_capture(
     package_root = normalize_evidence_package_root(
         os.environ.get("RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT")
     )
+    root_preexisting = Path(package_root).exists() if package_root is not None else False
     policies = policy_store or load_policy_store()
     verifier = (
         verifier_from_environment()
@@ -134,8 +184,24 @@ def _run_capture(
         max_receipt_bytes=MAX_RECEIPT_BYTES,
         receipt_signer=receipt_signer,
     )
-    _emit(captured, args.out)
-    return 0 if captured.receipt["status"] == "verified" else 1
+    try:
+        _emit(captured, args.out)
+    except BaseException as output_error:
+        try:
+            _rollback_package(captured, package_root, root_preexisting)
+        except Exception as cleanup_error:
+            package_path = (
+                Path(package_root) / captured.receipt["receipt_id"]
+                if package_root is not None and "evidence_package" in captured.receipt
+                else None
+            )
+            raise _OutputError(package_path) from cleanup_error
+        if isinstance(output_error, Exception):
+            raise _OutputError(None) from output_error
+        raise
+    if captured.receipt["status"] == "verified" and not captured.receipt["evidence_truncation"]:
+        return 0
+    return 1
 
 
 def main(
@@ -160,6 +226,13 @@ def main(
             signing=signing,
             receipt_signer=receipt_signer,
         )
+    except _OutputError as error:
+        message = "error: output failed; receipt output may be partial or already emitted"
+        if error.package_path is not None:
+            message += f"; evidence package may remain at {error.package_path}"
+        sys.stderr.write(message + "\n")
+        sys.stderr.flush()
+        return 2
     except Exception:
         sys.stderr.write("error: command failed; no receipt was emitted\n")
         sys.stderr.flush()

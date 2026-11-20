@@ -414,11 +414,11 @@ CAPTURE_STATUS=$?
 
 | Exit | Meaning | Receipt and required action |
 | --- | --- | --- |
-| `0` | Capture completed with `status=verified`. | A receipt is emitted. Continue to offline consumer verification before any separate promotion action. |
-| `1` | Capture completed with `status=failed` or `unknown`. | A receipt is still emitted. Retain it as an audit record, signed when signing is configured, deny promotion, and inspect `reasons` and `missing_coverage`. |
-| `2` | Usage, input, configuration, signing, export, output, or internal error. | No receipt is emitted. Deny promotion and correct the error; never substitute an unsigned or stale receipt. |
+| `0` | Capture completed with `status=verified` and empty `evidence_truncation`. | A receipt is emitted. Continue to offline consumer verification before any separate promotion action. |
+| `1` | Capture completed with `status=failed` or `unknown`, or with `status=verified` and nonempty `evidence_truncation`. | A receipt is still emitted. Retain it as an audit record, signed when signing is configured, deny promotion, and inspect `reasons` and `missing_coverage`. |
+| `2` | Usage, input, configuration, signing, export, output, or internal error. | Failures before output emit no receipt. An output failure can leave partial or complete receipt bytes on stdout; package rollback is attempted, and a cleanup failure identifies where evidence may remain. Deny promotion and correct the error; never substitute an unsigned or stale receipt. |
 
-Without `--out`, stdout contains only the receipt JSON. With `--out`, the receipt goes to that file instead. The output is created with mode `0600` on POSIX and an existing path is never overwritten, so retain and remove the previous fixed-name file before another capture. Diagnostics go to stderr.
+Without `--out`, stdout contains only the receipt JSON. With `--out`, the receipt goes to that file instead. The output is created with mode `0600` on POSIX and an existing path is never overwritten, so retain and remove the previous fixed-name file before another capture. Diagnostics go to stderr. After an output failure following package publication, the CLI validates and removes only the newly published package. If that cleanup also fails, exit `2` reports the package location rather than claiming that no receipt exists. A partial write or a flush failure after a complete write can therefore leave receipt output even when package rollback succeeds; the diagnostic explicitly acknowledges this possibility.
 
 After exit `0` or `1`, validate and save `receipt_id` as the locator used by section 8:
 

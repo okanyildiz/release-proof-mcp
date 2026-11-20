@@ -28,6 +28,8 @@
 - Verify the complete Linux, macOS, and Windows matrix on Python 3.11 through 3.13 in hosted CI, including real Windows descendant termination after normal parent exit and startup-failure cleanup without payload execution.
 - Make tool-version, line-ending, and POSIX permission tests platform-aware.
 - Isolate capture tests from ambient signing configuration, prohibit infrastructure access in the demo isolation test, and verify that package-signing failures expose no secret-bearing error text or partial package.
+- Return exit 1 for verified but truncated producer receipts, matching consumer denial, and roll back only the newly published evidence package after output failure. If rollback also fails, report the package location rather than claiming that no receipt exists.
+- Compare canonical receipt bytes during rollback, support non-ASCII signing metadata, treat partial stdout writes as output failures, and preserve keyboard interruption after package cleanup. Output-failure diagnostics acknowledge that receipt bytes may already be emitted, including after a failed flush.
 
 ### Release evidence notes
 

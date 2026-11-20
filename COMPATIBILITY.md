@@ -26,6 +26,8 @@ The consumer's freshness contract combines nonce equality with consumer-side tim
 
 `release-proof-verify` returns 0 for allow, 1 for deny, and 2 for input/usage errors. Receipt, expectation, and public-key inputs are each limited to 2 MiB; strict JSON rejects duplicate keys, nonfinite numbers, and excessive nesting. Packages use the documented per-file and total bounds and exact five-file set. These behaviors are part of the consumer interface.
 
+`release-proof capture` returns 0 only for a verified receipt with empty `evidence_truncation`, returns 1 for failed, unknown, or verified truncated receipts, and returns 2 for usage, configuration, export, output, or internal errors. An output failure after package publication triggers validated rollback of only the newly published package. If that cleanup also fails, exit 2 identifies where the evidence may remain instead of claiming that no receipt exists. Diagnostics distinguish pre-output errors from output attempts because partial writes or a flush failure after a complete write can leave receipt output even after successful rollback.
+
 ## Reason codes
 
 Adding a reason code is additive and may occur within an existing policy or receipt contract version. `REPOSITORY_NOT_VISIBLE` is additive unknown coverage: a repository visibility probe failed or did not match the requested repository under the documented case-insensitive repository-name comparison, so later absence cannot be conclusive. Probe failures preserve their actual reason across dependent checks. Removing or renaming a code, or changing its meaning, is breaking and requires a new contract version. Consumers must handle unrecognized codes without treating them as success.
