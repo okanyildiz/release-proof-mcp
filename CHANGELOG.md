@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-11-20
 
 ### Added
 
@@ -11,13 +11,14 @@
 - Add optional verifier instance and operator-supplied build-digest metadata; the build digest is not measured or verified provenance.
 - Add the independent offline `release-proof-verify` consumer with exact full-subject and full-verifier expectations, policy hash, issuer, trusted public key, nonce, consumer-side maximum age, and 0/1/2 allow/deny/input exit codes.
 - Add optional signed five-file evidence packages with deterministic manifests, exact accepted Sigstore/OCI artifacts, operator-root MCP export, owner-only permissions, staged no-overwrite publication, and independent offline package verification.
+- Add a three-OS, Python 3.11-3.13 CI matrix and tag-driven build/release automation with Actions build provenance when the account can run it.
 
 ### Changed
 
 - Break receipt v1 consumer compatibility: v2 requires the new metadata and full subject, renames `merge_commit_directly_reviewed` to `expected_commit_directly_reviewed`, and rejects v1 rather than relabeling it.
 - Pin runtime dependencies to `cryptography==50.0.2` and `jsonschema==4.26.0`.
 - Correct OCI image manifest recognition from `application/vnd.oci.image.manifest.v2+json` to the standard `application/vnd.oci.image.manifest.v1+json`, as exercised by the live GHCR fixture.
-- Define independent package, MCP, policy, receipt, and reason-code compatibility contracts. The package remains 0.1.0 and these changes remain Unreleased.
+- Define independent package, MCP, policy, receipt, and reason-code compatibility contracts. The package version is 0.1.0.
 
 ### Security
 

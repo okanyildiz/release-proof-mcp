@@ -1,6 +1,6 @@
-# Release Proof MCP: current-branch usage guide
+# Release Proof MCP: v0.1.0 usage guide
 
-This guide applies to `feat/enterprise-signed-evidence`, package version `0.1.0`, receipt schema `release-deployment-proof/v2`, and evidence-package schema `release-proof-evidence-package/v1`. Replace every example identity and absolute placeholder path with reviewed values for a dedicated environment. Examples contain no credentials.
+This guide applies to the `v0.1.0` release, receipt schema `release-deployment-proof/v2`, and evidence-package schema `release-proof-evidence-package/v1`. Replace every example identity and absolute placeholder path with reviewed values for a dedicated environment. Examples contain no credentials.
 
 ## 1. Honest fit and a typical company workflow
 
@@ -58,13 +58,14 @@ For organizational separation, these roles need appropriately independent identi
 
 Docker `24.0.6` and kind `0.33.0` were fixture tools, not normal producer prerequisites. The dependency pins do not make the installation hermetic or reproducible. Production OpenBao TLS, workload-auth operations, sealing, HA, audit reliability, HSM backing, and managed KMS remain unvalidated by this project.
 
-### Check out and install this branch
+### Check out and install v0.1.0
 
-Start from an existing checkout that contains the feature branch; do not assume it has merged or been published:
+Clone the repository and check out the exact release tag rather than a moving branch:
 
 ```sh
-git -C /absolute/path/release-proof-mcp switch feat/enterprise-signed-evidence
-test "$(git -C /absolute/path/release-proof-mcp branch --show-current)" = feat/enterprise-signed-evidence
+git clone https://github.com/okanyildiz/release-proof-mcp.git /absolute/path/release-proof-mcp
+git -C /absolute/path/release-proof-mcp switch --detach v0.1.0
+test "$(git -C /absolute/path/release-proof-mcp describe --tags --exact-match HEAD)" = v0.1.0
 git -C /absolute/path/release-proof-mcp rev-parse HEAD
 python3.11 -m venv /absolute/path/release-proof-mcp/.venv
 /absolute/path/release-proof-mcp/.venv/bin/python -m pip install /absolute/path/release-proof-mcp
