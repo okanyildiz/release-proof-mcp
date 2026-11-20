@@ -72,6 +72,7 @@ class RuntimeSnapshot:
     available: int
     revision: str | None
     pods: list[PodObservation] = field(default_factory=list)
+    excluded_terminal_pods: int = 0
 
     def observation_reason(self) -> Reason | None:
         if self.desired <= 0:
@@ -257,6 +258,9 @@ def build_snapshot(
             continue
         pod_spec = _dict(pod.get("spec"))
         pod_status = _dict(pod.get("status"))
+        if pod_status.get("phase") in {"Failed", "Succeeded"}:
+            snapshot.excluded_terminal_pods += 1
+            continue
         pod_containers = pod_spec.get("containers")
         if not isinstance(pod_containers, list):
             raise RuntimeEvidenceError(Reason("RUNTIME_EVIDENCE_INVALID", "An owned Pod has no container specification."))

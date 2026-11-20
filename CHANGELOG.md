@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Exclude owned terminal Pods in `Failed` or `Succeeded` phase from active rollout, digest reconciliation, and stability fingerprints while recording `evidence.excluded_terminal_pods`. Running-to-terminal transitions still produce `RUNTIME_CHANGED_DURING_VERIFICATION`.
+
 ## 0.1.1 - 2026-11-20
 
 ### Added
