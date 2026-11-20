@@ -26,6 +26,7 @@ def test_windows_package_write_does_not_use_posix_permissions(
         package_module.os,
         "fchmod",
         Mock(side_effect=AttributeError("fchmod is unavailable on Windows")),
+        raising=False,
     )
 
     package_module._write_new_file(tmp_path / "receipt.json", b"{}")
@@ -88,3 +89,17 @@ def test_taskkill_failure_falls_back_to_process_kill(monkeypatch) -> None:
     runner_module.ProcessRunner()._kill_process_group(process)
 
     process.kill.assert_called_once_with()
+
+
+def test_inactive_windows_job_still_uses_root_process_cleanup(monkeypatch) -> None:
+    monkeypatch.setattr(runner_module, "os", _windows_namespace())
+    taskkill = Mock(return_value=subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(runner_module.subprocess, "run", taskkill)
+    job = Mock()
+    job.terminate.return_value = False
+    process = Mock(pid=1234)
+
+    runner_module.ProcessRunner()._kill_process_group(process, job)
+
+    taskkill.assert_called_once()
+    process.kill.assert_not_called()

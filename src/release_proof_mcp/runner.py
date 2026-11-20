@@ -9,6 +9,8 @@ import time
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from .windows_process import WindowsJob
+
 SECRET_ENV_NAMES = (
     "GH_TOKEN",
     "GITHUB_TOKEN",
@@ -94,6 +96,7 @@ class ProcessRunner:
                 start_new_session=os.name == "posix",
                 creationflags=(
                     getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    | getattr(subprocess, "CREATE_SUSPENDED", 0)
                     if os.name == "nt"
                     else 0
                 ),
@@ -103,7 +106,15 @@ class ProcessRunner:
 
         readers: list[_BoundedReader] = []
         started_threads: list[threading.Thread] = []
+        job: WindowsJob | None = None
         try:
+            if os.name == "nt":
+                try:
+                    job = WindowsJob(process._handle, process.pid)
+                except OSError as error:
+                    raise RunnerError(
+                        f"Unable to establish safe process cleanup: {argv[0]}."
+                    ) from error
             assert process.stdout is not None
             assert process.stderr is not None
             for stream in (process.stdout, process.stderr):
@@ -116,7 +127,7 @@ class ProcessRunner:
             if cancel_event is not None and cancel_event.is_set():
                 raise CommandCancelled(f"Command was cancelled: {argv[0]}.")
             self._finish_readers(
-                process, tuple(started_threads), tuple(readers), argv[0]
+                process, tuple(started_threads), tuple(readers), argv[0], job
             )
             stdout_reader, stderr_reader = readers
             if stdout_reader.truncated or stderr_reader.truncated:
@@ -131,7 +142,7 @@ class ProcessRunner:
                 raise CommandCancelled(f"Command was cancelled: {argv[0]}.")
             return result
         except BaseException:
-            self._kill_process_group(process)
+            self._kill_process_group(process, job)
             try:
                 self._bounded_reap(process)
             except Exception:
@@ -146,6 +157,9 @@ class ProcessRunner:
             self._close_process_streams(process)
             self._join_readers(tuple(started_threads), 0.05)
             raise
+        finally:
+            if job is not None:
+                job.close()
 
     def _wait_for_exit(
         self,
@@ -173,11 +187,12 @@ class ProcessRunner:
         threads: tuple[threading.Thread, threading.Thread],
         readers: tuple["_BoundedReader", "_BoundedReader"],
         command: str,
+        job: WindowsJob | None,
     ) -> None:
         if self._join_readers(threads, self.reader_timeout_seconds):
             self._check_reader_errors(readers, command)
             return
-        self._kill_process_group(process)
+        self._kill_process_group(process, job)
         self._bounded_reap(process)
         if self._join_readers(threads, self.reader_timeout_seconds):
             self._check_reader_errors(readers, command)
@@ -204,7 +219,15 @@ class ProcessRunner:
         except subprocess.TimeoutExpired:
             pass
 
-    def _kill_process_group(self, process: subprocess.Popen[bytes]) -> None:
+    def _kill_process_group(
+        self, process: subprocess.Popen[bytes], job: WindowsJob | None = None
+    ) -> None:
+        if job is not None:
+            try:
+                if job.terminate():
+                    return
+            except OSError:
+                pass
         if os.name == "posix":
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -262,7 +285,7 @@ class _BoundedReader:
         total = 0
         try:
             while True:
-                chunk = self.stream.read(65536)
+                chunk = self.stream.read1(65536)
                 if not chunk:
                     break
                 total += len(chunk)

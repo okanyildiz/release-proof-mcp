@@ -12,7 +12,7 @@
 
 - Reject an empty evidence-package root before policy loading, verification, signing, or filesystem writes on both CLI and MCP, avoiding publication into the current directory.
 - Support package consumption on Windows without `dir_fd` by validating path types before opening and rechecking file and root identities after bounded reads.
-- Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX, close Windows subprocess stream objects during forced cleanup, and fall back to `process.kill()` when `taskkill` fails.
+- Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX, drain available pipe chunks with `read1`, and use a kill-on-close Windows Job Object assigned before the new process resumes so descendants cannot retain output pipes after their parent exits.
 
 ## 0.1.1 - 2026-11-20
 
