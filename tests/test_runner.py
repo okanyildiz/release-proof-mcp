@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -42,16 +43,46 @@ def test_process_tree_timeout_terminates_group_and_bounded_drainage() -> None:
 def test_descendant_pipes_after_normal_parent_exit_have_bounded_cleanup() -> None:
     script = (
         "import subprocess,sys;"
-        "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
-        "print('parent-done',flush=True)"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
+        "print(f'parent-done:{child.pid}',flush=True)"
     )
     runner = ProcessRunner(timeout_seconds=2, reader_timeout_seconds=0.1, environment={})
     started = time.monotonic()
 
     result = runner.run([sys.executable, "-c", script])
 
-    assert result.stdout == b"parent-done" + os.linesep.encode("ascii")
+    marker, descendant_pid = result.stdout.decode("ascii").strip().split(":")
+    assert marker == "parent-done"
     assert time.monotonic() - started < 2.0
+
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int32, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        kernel32.GetExitCodeProcess.restype = ctypes.c_int32
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int32
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            handle = kernel32.OpenProcess(0x1000, False, int(descendant_pid))
+            if not handle:
+                if ctypes.get_last_error() == 87:
+                    break
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                exit_code = ctypes.c_uint32()
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if exit_code.value != 259:
+                    break
+            finally:
+                kernel32.CloseHandle(handle)
+            time.sleep(0.02)
+        else:
+            pytest.fail("The descendant survived after its parent exited")
 
     if os.name == "posix":
         detached_script = (
@@ -137,6 +168,35 @@ def test_reader_start_failure_cleans_up_started_resources(
     assert len(started_threads) == failure_attempt - 1
     assert all(not thread.is_alive() for thread in started_threads)
     assert processes[0].returncode is not None
+    assert processes[0].stdout is not None and processes[0].stdout.closed
+    assert processes[0].stderr is not None and processes[0].stderr.closed
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object startup")
+def test_windows_job_setup_failure_never_executes_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from release_proof_mcp import runner as runner_module
+
+    marker = tmp_path / "payload-executed"
+    script = f"from pathlib import Path;Path({str(marker)!r}).write_text('executed')"
+    real_popen = subprocess.Popen
+    real_wait = subprocess.Popen.wait
+    processes: list[subprocess.Popen[bytes]] = []
+
+    def capture_process(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    monkeypatch.setattr(runner_module, "WindowsJob", Mock(side_effect=OSError(5, "injected")))
+
+    with pytest.raises(runner_module.RunnerError, match="safe process cleanup"):
+        ProcessRunner(environment={}).run([sys.executable, "-c", script])
+
+    real_wait(processes[0], timeout=2)
+    assert not marker.exists()
     assert processes[0].stdout is not None and processes[0].stdout.closed
     assert processes[0].stderr is not None and processes[0].stderr.closed
 

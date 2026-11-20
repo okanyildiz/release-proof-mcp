@@ -15,6 +15,7 @@ _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _THREAD_SUSPEND_RESUME = 0x0002
 _TH32CS_SNAPTHREAD = 0x00000004
 _ERROR_NO_MORE_FILES = 18
+_ERROR_BAD_LENGTH = 24
 
 
 class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
@@ -95,12 +96,21 @@ class _Kernel32:
         self._bind(library, "CloseHandle", [_HANDLE], ctypes.c_int32)
         self._bind(library, "GetLastError", [], _DWORD)
         self._bind(library, "SetLastError", [_DWORD], None)
+        self._bind(
+            library,
+            "GetHandleInformation",
+            [_HANDLE, ctypes.POINTER(_DWORD)],
+            ctypes.c_int32,
+        )
+        self._bind(
+            library, "SetHandleInformation", [_HANDLE, _DWORD, _DWORD], ctypes.c_int32
+        )
 
-    @staticmethod
-    def _bind(library: Any, name: str, arguments: list[Any], result: Any) -> None:
+    def _bind(self, library: Any, name: str, arguments: list[Any], result: Any) -> None:
         function = getattr(library, name)
         function.argtypes = arguments
         function.restype = result
+        setattr(self, name, function)
 
 
 class WindowsJob:
@@ -116,6 +126,12 @@ class WindowsJob:
         if not self._handle:
             _raise_last_error(self._api.GetLastError())
         try:
+            handle_flags = _DWORD()
+            self._require(
+                self._api.GetHandleInformation(self._handle, ctypes.byref(handle_flags))
+            )
+            if handle_flags.value & 1:
+                self._require(self._api.SetHandleInformation(self._handle, 1, 0))
             information = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
             information.BasicLimitInformation.LimitFlags = (
                 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -151,9 +167,15 @@ class WindowsJob:
             self._require(self._api.CloseHandle(handle))
 
     def _resume_primary_thread(self, process_id: int) -> None:
-        snapshot = self._api.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
-        if snapshot == _INVALID_HANDLE_VALUE or not snapshot:
-            _raise_last_error(self._api.GetLastError())
+        for _ in range(5):
+            snapshot = self._api.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+            if snapshot != _INVALID_HANDLE_VALUE and snapshot:
+                break
+            error = self._api.GetLastError()
+            if error != _ERROR_BAD_LENGTH:
+                _raise_last_error(error)
+        else:
+            _raise_last_error(error)
         try:
             entry = _THREADENTRY32()
             entry.dwSize = ctypes.sizeof(entry)

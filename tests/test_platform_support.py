@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from conftest import Harness
 from release_proof_mcp import consumer as consumer_module
 from release_proof_mcp import evidence_package as package_module
@@ -103,3 +105,53 @@ def test_inactive_windows_job_still_uses_root_process_cleanup(monkeypatch) -> No
 
     taskkill.assert_called_once()
     process.kill.assert_not_called()
+
+
+def test_windows_spawn_requires_suspended_process_group(monkeypatch) -> None:
+    monkeypatch.setattr(runner_module, "os", _windows_namespace())
+    captured = {}
+
+    def stop_before_spawn(*args, **kwargs):
+        captured.update(kwargs)
+        raise RuntimeError("Stop before creating a process")
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", stop_before_spawn)
+
+    with pytest.raises(RuntimeError, match="Stop before"):
+        runner_module.ProcessRunner(environment={}).run(["tool"])
+
+    assert captured["creationflags"] & 0x00000004
+    assert captured["creationflags"] & 0x00000200
+    assert captured["shell"] is False
+
+
+@pytest.mark.parametrize(
+    ("wait_error", "expected"),
+    [
+        (None, runner_module.RunnerError),
+        (subprocess.TimeoutExpired("tool", 1), runner_module.CommandTimeout),
+    ],
+)
+def test_windows_job_close_failure_preserves_the_primary_outcome(
+    monkeypatch, wait_error, expected
+) -> None:
+    monkeypatch.setattr(runner_module, "os", _windows_namespace())
+    process = SimpleNamespace(
+        stdout=io.BytesIO(),
+        stderr=io.BytesIO(),
+        pid=1234,
+        _handle=19,
+        returncode=0,
+        wait=Mock(side_effect=wait_error, return_value=0),
+        kill=Mock(),
+    )
+    monkeypatch.setattr(runner_module.subprocess, "Popen", Mock(return_value=process))
+    job = Mock()
+    job.terminate.return_value = True
+    job.close.side_effect = OSError(5, "close failed")
+    monkeypatch.setattr(runner_module, "WindowsJob", Mock(return_value=job))
+
+    with pytest.raises(expected):
+        runner_module.ProcessRunner(
+            timeout_seconds=0.01, reader_timeout_seconds=0.05, environment={}
+        ).run(["tool"], timeout=0.01)

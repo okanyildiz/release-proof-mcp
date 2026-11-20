@@ -9,6 +9,7 @@ import pytest
 from release_proof_mcp.windows_process import (
     WindowsJob,
     _JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    _Kernel32,
     _THREADENTRY32,
 )
 
@@ -51,6 +52,8 @@ def fake_kernel32(resume_result: int = 1) -> tuple[SimpleNamespace, list[tuple]]
             side_effect=lambda *args: calls.append(("terminate", *args)) or 1
         ),
         CloseHandle=Mock(side_effect=lambda handle: calls.append(("close", handle)) or 1),
+        GetHandleInformation=Mock(return_value=1),
+        SetHandleInformation=Mock(return_value=1),
     )
     api.GetLastError = Mock(side_effect=lambda: api.last_error)
     api.SetLastError = Mock(
@@ -97,3 +100,40 @@ def test_windows_job_termination_covers_all_members() -> None:
 
     assert ("terminate", 20, 1) in calls
     assert job.terminate() is False
+
+
+def test_kernel32_binding_is_exposed_on_the_api_object() -> None:
+    api = object.__new__(_Kernel32)
+    function = Mock()
+    library = SimpleNamespace(CreateJobObjectW=function)
+
+    api._bind(library, "CreateJobObjectW", [], None)
+
+    assert api.CreateJobObjectW is function
+
+
+def test_windows_thread_snapshot_retries_bad_length() -> None:
+    api, calls = fake_kernel32()
+    api.CreateToolhelp32Snapshot = Mock(side_effect=[0, 21])
+    api.last_error = 24
+
+    job = WindowsJob(19, 4321, api=api)
+    job.close()
+
+    assert api.CreateToolhelp32Snapshot.call_count == 2
+    assert ("resume", 22) in calls
+
+
+def test_windows_job_clears_accidental_handle_inheritance() -> None:
+    api, calls = fake_kernel32()
+
+    def inherited_handle(handle: int, pointer: object) -> int:
+        pointer._obj.value = 1
+        return 1
+
+    api.GetHandleInformation = Mock(side_effect=inherited_handle)
+
+    job = WindowsJob(19, 4321, api=api)
+    job.close()
+
+    api.SetHandleInformation.assert_called_once_with(20, 1, 0)

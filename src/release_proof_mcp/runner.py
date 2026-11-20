@@ -4,6 +4,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -94,12 +95,7 @@ class ProcessRunner:
                 shell=False,
                 env=self.environment,
                 start_new_session=os.name == "posix",
-                creationflags=(
-                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                    | getattr(subprocess, "CREATE_SUSPENDED", 0)
-                    if os.name == "nt"
-                    else 0
-                ),
+                creationflags=(0x00000200 | 0x00000004 if os.name == "nt" else 0),
             )
         except (FileNotFoundError, PermissionError, OSError) as error:
             raise ToolUnavailable(f"Unable to execute {argv[0]}.") from error
@@ -110,7 +106,7 @@ class ProcessRunner:
         try:
             if os.name == "nt":
                 try:
-                    job = WindowsJob(process._handle, process.pid)
+                    job = WindowsJob(int(process._handle), process.pid)
                 except OSError as error:
                     raise RunnerError(
                         f"Unable to establish safe process cleanup: {argv[0]}."
@@ -159,7 +155,14 @@ class ProcessRunner:
             raise
         finally:
             if job is not None:
-                job.close()
+                primary_error = sys.exc_info()[0]
+                try:
+                    job.close()
+                except OSError as error:
+                    if primary_error is None:
+                        raise RunnerError(
+                            f"Unable to complete safe process cleanup: {argv[0]}."
+                        ) from error
 
     def _wait_for_exit(
         self,
