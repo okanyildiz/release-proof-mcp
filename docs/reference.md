@@ -554,7 +554,7 @@ See [SECURITY.md](../SECURITY.md) for the reporting process and operational reco
 
 ## Tests and verification
 
-The local macOS offline suite reports **861 passed, 3 skipped**. Windows CI has additional platform- or capability-specific skips. Two skipped tests are the opt-in live provider and real OpenBao integration tests; the others depend on the host. The badge links to current hosted CI results.
+The local macOS offline suite reports **861 passed, 3 skipped**. Windows CI reports **859 passed, 5 skipped** on each supported Python version. Two skipped tests are the opt-in live provider and real OpenBao integration tests; the others are platform- or capability-specific. The [nine-job hosted CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44832838349) passed, and the badge links to hosted CI status.
 
 ```sh
 python -m pip install '.[test]'
