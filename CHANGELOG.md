@@ -7,10 +7,14 @@
 - Add a code of conduct, issue templates for bugs/evidence mismatches/live results, and a security-focused pull request template.
 - Record real fixture evidence that same-repository non-reusable signers use the source commit as `buildSignerDigest`. The same-repository trusted-policy example uses `signer_digest: null`, while caller JSON examples omit the field.
 - Generate and verify `SHA256SUMS.txt` in the release workflow and document `gh attestation verify` for workflow-produced release artifacts.
+- Add `release-proof capture` for CLI-based production of signed receipts and optional five-file evidence packages through the same policy, verification, signing, export, and size-bound path used by MCP.
+- Add `release-proof demo` for a zero-infrastructure, explicitly simulated signed evidence flow with an ephemeral in-memory key, independent consumer allowance, one-byte tamper denial, digest mismatch, and registry-unavailable outcomes.
+- Move the raw stdio MCP client example to `docs/mcp-capture.md` and make `GUIDE.md` capture instructions CLI-centered.
 
 ### Changed
 
 - Replace the banner tagline with "From reviewed commit to verifiable deployment evidence."
+- Replace the root README with a one-page trust-separation and adoption guide. Preserve the detailed verification, configuration, integration, security, and FAQ material in `docs/reference.md` with corrected links and current validation evidence.
 
 ### Fixed
 
@@ -18,9 +22,12 @@
 - Establish repository visibility before GitHub evidence checks and classify `(HTTP NNN)` responses by status before narrowly scoped text heuristics. Missing commits now produce conclusive failures when appropriate, while invisible repositories and access/rate-limit failures remain unknown with `REPOSITORY_NOT_VISIBLE` or the documented access code. Probe failures preserve their actual reason across source, attestation, workflow, and approval checks and skip attestation retrieval. Repository names are compared case-insensitively, and Cosign uses the same denial/rate-limit/service-error mapping. Exact plain `gh: HTTP NNN` lines are classified by status without matching substrings in SHAs or V12 identifiers.
 - Read transparency log identifiers from both the legacy verification result and `attestation.bundle.verificationMaterial.tlogEntries`, matching real `gh attestation verify` output.
 - Remove the stale no-runtime-dependencies file and correct repository wording, Windows validation limits, live example signer configuration, and documentation punctuation.
-- Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX platforms while preserving no-overwrite package publication. Use platform-native access controls elsewhere.
-- Close Windows subprocess stream objects during forced cleanup and fall back to `process.kill()` when `taskkill` fails.
+- Reject an empty evidence-package root before policy loading, verification, signing, or filesystem writes on both CLI and MCP, avoiding publication into the current directory.
+- Support package consumption on Windows without `dir_fd` by validating path types before opening and rechecking file and root identities after bounded reads.
+- Restrict POSIX `fchmod` and exact `0600` permission checks to POSIX, drain available pipe chunks with `read1`, and use a kill-on-close Windows Job Object assigned before the new process resumes so descendants cannot retain output pipes after their parent exits.
+- Verify the complete Linux, macOS, and Windows matrix on Python 3.11 through 3.13 in hosted CI, including real Windows descendant termination after normal parent exit and startup-failure cleanup without payload execution.
 - Make tool-version, line-ending, and POSIX permission tests platform-aware.
+- Isolate capture tests from ambient signing configuration, prohibit infrastructure access in the demo isolation test, and verify that package-signing failures expose no secret-bearing error text or partial package.
 
 ### Release evidence notes
 

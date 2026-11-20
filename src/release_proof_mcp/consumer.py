@@ -292,6 +292,8 @@ def _verify_package_attachments(
 
 
 def _read_package_files(package_path: str | Path) -> dict[str, bytes]:
+    if os.name != "posix":
+        return _read_package_files_windows(package_path)
     flags = (
         os.O_RDONLY
         | getattr(os, "O_DIRECTORY", 0)
@@ -339,6 +341,56 @@ def _read_package_files(package_path: str | Path) -> dict[str, bytes]:
         raise _VerificationFailure("PACKAGE_FILE_INVALID") from error
     finally:
         os.close(root_descriptor)
+
+
+def _read_package_files_windows(package_path: str | Path) -> dict[str, bytes]:
+    try:
+        root = os.fspath(package_path)
+        root_before = os.lstat(root)
+        if not stat.S_ISDIR(root_before.st_mode):
+            raise _VerificationFailure("PACKAGE_FILE_INVALID")
+        if set(os.listdir(root)) != PACKAGE_FILENAMES:
+            raise _VerificationFailure("PACKAGE_FILE_SET_INVALID")
+        package_files: dict[str, bytes] = {}
+        total = 0
+        for name, limit in PACKAGE_FILE_LIMITS.items():
+            path = os.path.join(root, name)
+            before = os.lstat(path)
+            if not stat.S_ISREG(before.st_mode):
+                raise _VerificationFailure("PACKAGE_FILE_INVALID")
+            file_flags = (
+                os.O_RDONLY
+                | getattr(os, "O_BINARY", 0)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            descriptor = os.open(path, file_flags)
+            try:
+                raw = _read_bounded_descriptor(descriptor, limit)
+            finally:
+                os.close(descriptor)
+            after = os.lstat(path)
+            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                raise _VerificationFailure("PACKAGE_FILE_INVALID")
+            package_files[name] = raw
+            total += len(raw)
+            if total > MAX_PACKAGE_TOTAL_BYTES:
+                raise _VerificationFailure("PACKAGE_TOTAL_TOO_LARGE")
+        root_after = os.lstat(root)
+        if (root_before.st_dev, root_before.st_ino) != (
+            root_after.st_dev,
+            root_after.st_ino,
+        ):
+            raise _VerificationFailure("PACKAGE_FILE_INVALID")
+        if set(os.listdir(root)) != PACKAGE_FILENAMES:
+            raise _VerificationFailure("PACKAGE_FILE_SET_INVALID")
+        return package_files
+    except _FileTooLarge as error:
+        raise _VerificationFailure("PACKAGE_FILE_TOO_LARGE") from error
+    except StrictJSONError as error:
+        raise _VerificationFailure("PACKAGE_FILE_INVALID") from error
+    except OSError as error:
+        raise _VerificationFailure("PACKAGE_FILE_INVALID") from error
 
 
 def _read_bounded_descriptor(descriptor: int, limit: int) -> bytes:

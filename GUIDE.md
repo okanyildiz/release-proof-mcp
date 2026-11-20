@@ -342,34 +342,32 @@ PY
 
 The producer input also requires a full lowercase commit, a GHCR tag or SHA-256 digest reference, an exact `refs/heads/...` or `refs/tags/...` source ref, an explicit context and container, and attempt 1 when `expected_run` is supplied. The example omits caller signer fields so they inherit the trusted policy. Tags are supported, but digest input makes independent pinned-artifact expectations straightforward.
 
-## 7. Capture a receipt through executable stdio MCP
+## 7. Capture a receipt with the CLI
 
-The following inline Python starts the real server, completes `initialize` and `notifications/initialized`, calls `verify_release_deployment`, and keeps stdin open until the matching tool response arrives. It handles JSON-RPC errors, skips notifications, serializes `result.structuredContent` without changing its fields, and writes owner-only files. Run it in the configured producer environment after replacing the sanitized expectations:
+`release-proof capture` accepts the same `verify_release_deployment` arguments as MCP and uses the shared policy, verification, signing, and evidence-package capture path. Run it with the producer environment from sections 4 and 5, including the required policy and signing settings. `RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT` has the same effect for CLI and MCP capture. Advanced users can instead use the [raw stdio MCP client appendix](docs/mcp-capture.md).
+
+Build the request from the independently approved expectations and fresh nonce. The request schema is closed. This example writes exactly its required fields plus the optional `consumer_nonce` and `expected_run`; it omits the optional `signer_workflow` and `signer_digest` overrides so they inherit the trusted policy. Digest-form artifact input is required here so it matches the independently pinned artifact. The Python write rejects a symlink at the output path and writes mode `0600` on POSIX:
 
 ```sh
+(umask 077
 /absolute/path/release-proof-mcp/.venv/bin/python - <<'PY'
 import json
 import os
-import select
-import subprocess
-import time
-import uuid
+import re
 from pathlib import Path
 
-SERVER = "/absolute/path/release-proof-mcp/.venv/bin/release-proof-mcp"
-EXPECTATIONS = "/secure/consumer/config/consumer-expectations.json"
-NONCE = "/secure/work/consumer-nonce.txt"
-RECEIPT_ROOT = "/secure/receipts"
-PACKAGE_ROOT = "/secure/evidence/packages"
-MAX_RESPONSE_BYTES = 2 * 1024 * 1024
-RESPONSE_TIMEOUT = 150
-
-with open(EXPECTATIONS, "r", encoding="utf-8") as source:
+with open(
+    "/secure/consumer/config/consumer-expectations.json", "r", encoding="utf-8"
+) as source:
     expectation = json.load(source)
 subject = expectation["subject"]
 if subject["artifact_input"] != subject["pinned_artifact"]:
     raise ValueError("This capture example requires digest-form artifact input")
-nonce = Path(NONCE).read_text(encoding="ascii")
+nonce = Path("/secure/work/consumer-nonce.txt").read_text(
+    encoding="ascii"
+).rstrip("\r\n")
+if re.fullmatch(r"[A-Za-z0-9_-]{22,128}", nonce) is None:
+    raise ValueError("Nonce must be 22-128 ASCII base64url characters")
 arguments = {
     key: subject[key]
     for key in (
@@ -387,138 +385,78 @@ arguments["artifact"] = subject["artifact_input"]
 arguments["consumer_nonce"] = nonce
 if subject["expected_run"] is not None:
     arguments["expected_run"] = subject["expected_run"]
-
-process = subprocess.Popen(
-    [SERVER],
-    cwd="/absolute/path/release-proof-mcp",
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    bufsize=0,
-)
-if process.stdin is None or process.stdout is None:
-    raise RuntimeError("MCP pipes were not created")
-
-
-def send(message):
-    frame = json.dumps(
-        message, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("ascii") + b"\n"
-    process.stdin.write(frame)
-    process.stdin.flush()
-
-
-def response_for(request_id):
-    deadline = time.monotonic() + RESPONSE_TIMEOUT
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("Timed out waiting for the MCP response")
-        ready, _, _ = select.select([process.stdout], [], [], remaining)
-        if not ready:
-            raise TimeoutError("Timed out waiting for the MCP response")
-        line = process.stdout.readline(MAX_RESPONSE_BYTES + 1)
-        if not line:
-            raise RuntimeError("MCP server closed stdout before responding")
-        if len(line) > MAX_RESPONSE_BYTES:
-            raise ValueError("MCP response exceeds the capture limit")
-        message = json.loads(line.decode("utf-8"))
-        if not isinstance(message, dict):
-            raise ValueError("MCP response is not an object")
-        if "id" not in message:
-            continue
-        if message.get("id") != request_id:
-            raise ValueError("MCP response has an unexpected request ID")
-        if "error" in message:
-            error = message["error"]
-            raise RuntimeError(
-                f"MCP JSON-RPC error {error.get('code')}: {error.get('message')}"
-            )
-        result = message.get("result")
-        if not isinstance(result, dict):
-            raise ValueError("MCP response has no object result")
-        return result
-
-
-def write_private(path, data, overwrite):
-    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    flags |= os.O_TRUNC if overwrite else os.O_EXCL
-    fd = os.open(path, flags, 0o600)
-    with os.fdopen(fd, "wb") as output:
-        os.fchmod(output.fileno(), 0o600)
-        output.write(data)
-        output.flush()
-        os.fsync(output.fileno())
-
-
-try:
-    send({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "release-proof-capture", "version": "1"},
-        },
-    })
-    initialized = response_for(1)
-    if initialized.get("protocolVersion") != "2025-06-18":
-        raise ValueError("MCP protocol version mismatch")
-    send({"jsonrpc": "2.0", "method": "notifications/initialized"})
-    send({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/call",
-        "params": {
-            "name": "verify_release_deployment",
-            "arguments": arguments,
-        },
-    })
-    result = response_for(2)
-    if result.get("isError") is not False:
-        raise RuntimeError("MCP tool returned an error result")
-    receipt = result.get("structuredContent")
-    if not isinstance(receipt, dict):
-        raise ValueError("MCP tool result has no structuredContent receipt")
-    receipt_id = receipt.get("receipt_id")
-    parsed_id = uuid.UUID(receipt_id) if isinstance(receipt_id, str) else None
-    if parsed_id is None or parsed_id.version != 4 or str(parsed_id) != receipt_id:
-        raise ValueError("Receipt has no canonical UUID4 receipt_id")
-    encoded = json.dumps(
-        receipt, sort_keys=True, separators=(",", ":"),
-        ensure_ascii=False, allow_nan=False,
-    ).encode("utf-8")
-    write_private(f"{RECEIPT_ROOT}/{receipt_id}.json", encoded, overwrite=False)
-    write_private("/secure/work/current-receipt-id", receipt_id.encode("ascii"), overwrite=True)
-    print(f"receipt_id={receipt_id}")
-    print(f"receipt_file={RECEIPT_ROOT}/{receipt_id}.json")
-    if "evidence_package" in receipt:
-        print(f"package_directory={PACKAGE_ROOT}/{receipt_id}")
-    else:
-        print("package_directory=none; retain the signed audit receipt")
-finally:
-    try:
-        process.stdin.close()
-    except BrokenPipeError:
-        pass
-    try:
-        process.wait(timeout=140)
-    except subprocess.TimeoutExpired:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-    process.stdout.close()
+encoded = json.dumps(
+    arguments, sort_keys=True, separators=(",", ":"),
+    ensure_ascii=False, allow_nan=False,
+).encode("utf-8") + b"\n"
+flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+fd = os.open("/secure/work/capture-request.json", flags, 0o600)
+with os.fdopen(fd, "wb") as output:
+    os.fchmod(output.fileno(), 0o600)
+    output.write(encoded)
+    output.flush()
+    os.fsync(output.fileno())
 PY
+)
 ```
 
-Do **not** treat `release-proof-mcp > /secure/receipts/receipt.json` as sufficient. Server stdout carries JSON-RPC envelopes and can carry multiple messages; it is not a bare receipt channel. The consumer requires the signed receipt object or package, not an initialization response or protocol transcript. A JSON-RPC error produces no evidence claim. A tool result with `status=failed` or `unknown` can still be a signed audit receipt and is saved, but the consumer will deny it.
+Run the capture and record its exit status immediately:
+
+```sh
+/absolute/path/release-proof-mcp/.venv/bin/release-proof capture \
+  --request /secure/work/capture-request.json \
+  --nonce-file /secure/work/consumer-nonce.txt \
+  --out /secure/receipts/current-receipt.json
+CAPTURE_STATUS=$?
+```
+
+`--nonce-file` is optional. This flow uses it to reload the same nonce written into the request; the option overrides the request's `consumer_nonce` with that identical value. The file must contain ASCII base64url text matching `[A-Za-z0-9_-]{22,128}` after trailing CR/LF characters are removed. An invalid nonce is an input error.
+
+| Exit | Meaning | Receipt and required action |
+| --- | --- | --- |
+| `0` | Capture completed with `status=verified`. | A receipt is emitted. Continue to offline consumer verification before any separate promotion action. |
+| `1` | Capture completed with `status=failed` or `unknown`. | A receipt is still emitted. Retain it as an audit record, signed when signing is configured, deny promotion, and inspect `reasons` and `missing_coverage`. |
+| `2` | Usage, input, configuration, signing, export, output, or internal error. | No receipt is emitted. Deny promotion and correct the error; never substitute an unsigned or stale receipt. |
+
+Without `--out`, stdout contains only the receipt JSON. With `--out`, the receipt goes to that file instead. The output is created with mode `0600` on POSIX and an existing path is never overwritten, so retain and remove the previous fixed-name file before another capture. Diagnostics go to stderr.
+
+After exit `0` or `1`, validate and save `receipt_id` as the locator used by section 8:
+
+```sh
+(umask 077
+/absolute/path/release-proof-mcp/.venv/bin/python - <<'PY'
+import json
+import os
+import uuid
+
+with open("/secure/receipts/current-receipt.json", "r", encoding="utf-8") as source:
+    receipt = json.load(source)
+receipt_id = receipt.get("receipt_id")
+parsed_id = uuid.UUID(receipt_id) if isinstance(receipt_id, str) else None
+if parsed_id is None or parsed_id.version != 4 or str(parsed_id) != receipt_id:
+    raise ValueError("Receipt has no canonical UUID4 receipt_id")
+flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+fd = os.open("/secure/work/current-receipt-id", flags, 0o600)
+with os.fdopen(fd, "wb") as output:
+    os.fchmod(output.fileno(), 0o600)
+    output.write(receipt_id.encode("ascii"))
+    output.flush()
+    os.fsync(output.fileno())
+PY
+)
+```
+
+Create the per-receipt path used by the standalone command in section 8, then release the fixed output name for the next capture. `ln` does not replace an existing destination, and the source is removed only after the hard link succeeds:
+
+```sh
+RECEIPT_ID="$(cat /secure/work/current-receipt-id)"
+ln /secure/receipts/current-receipt.json "/secure/receipts/$RECEIPT_ID.json" &&
+  rm /secure/receipts/current-receipt.json
+```
 
 ### Package creation and location
 
-With `RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT=/secure/evidence/packages` and a working signing backend, a `verified` receipt with empty `evidence_truncation` is exported before the MCP response returns. The package is:
+This applies to the shared capture path used by either the CLI or MCP. With `RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT=/secure/evidence/packages` and a working signing backend, a `verified` receipt with empty `evidence_truncation` is exported before the CLI result or MCP response returns. The package is:
 
 ```text
 /secure/evidence/packages/<receipt_id>/
@@ -529,14 +467,14 @@ With `RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT=/secure/evidence/packages` and a worki
     oci-manifest.json
 ```
 
-Use the printed `receipt_id`, or read the locator file written by the capture example:
+Read the locator file written by the capture example:
 
 ```sh
 RECEIPT_ID="$(cat /secure/work/current-receipt-id)"
 printf '%s\n' "/secure/evidence/packages/$RECEIPT_ID"
 ```
 
-The locator is only a path aid, not a source of consumer expectations. Export creates a real `<root>/<receipt_id>` directory with exactly those five regular files, using staged no-overwrite publication. On POSIX the directory is `0700` and files are `0600`. Signing is mandatory. `failed`, `unknown`, and truncated receipts are not packaged; failed and unknown results instead remain signed audit receipts with no `evidence_package` claim. Export/signing failures produce a JSON-RPC error rather than an unsigned fallback.
+The locator is only a path aid, not a source of consumer expectations. Export creates a real `<root>/<receipt_id>` directory with exactly those five regular files, using staged no-overwrite publication. On POSIX the directory is `0700` and files are `0600`. Signing is mandatory. `failed`, `unknown`, and truncated receipts are not packaged; failed and unknown results instead remain signed audit receipts with no `evidence_package` claim. Export or signing failures produce CLI exit `2` with no receipt, or a JSON-RPC error through MCP, rather than an unsigned fallback.
 
 For receipt-only operation, unset `RELEASE_PROOF_EVIDENCE_PACKAGE_ROOT` while retaining signing. A verified receipt exported with a package descriptor cannot later be consumed as a standalone receipt.
 
