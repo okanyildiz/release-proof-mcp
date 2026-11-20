@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-805%20passed-14b8a6?style=for-the-badge" alt="Tests: 805 passed"></a>
+  <a href="https://github.com/okanyildiz/release-proof-mcp/actions/runs/44789256329"><img src="https://github.com/okanyildiz/release-proof-mcp/actions/workflows/ci.yml/badge.svg?branch=task%2Fproducer-cli" alt="CI"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
@@ -554,7 +554,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **805 passed, 3 skipped**. Two skipped tests are the opt-in live provider and real OpenBao integration tests. The third covers either POSIX permission bits on Windows or native Windows process startup on POSIX, depending on the host. The badge is a test-count badge, not a hosted CI status claim.
+The local macOS offline suite reports **805 passed, 3 skipped**. Windows CI reports **803 passed, 5 skipped** on each supported Python version. Two skipped tests are the opt-in live provider and real OpenBao integration tests; the others are platform- or capability-specific. The [nine-job hosted CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44789256329) passed, and the badge links to hosted CI status.
 
 ```sh
 python -m pip install '.[test]'
@@ -606,11 +606,11 @@ The optional test is the reproduction path for a new dedicated environment; the 
 
 ## Known limitations
 
-- **Live evidence is limited to two dedicated single-operator fixtures.** The 2026-11-18 run validated the provider path and standalone signed receipt. The 2026-11-20 run added a real private-GHCR, kind, stdio MCP, OpenBao five-file package export and independent consumer allow/deny. There is still no provider/runtime matrix, Cosign result, production cluster result, native Windows result, hosted CI result, release-artifact attestation, or independent organizational adoption evidence.
+- **Live evidence is limited to two dedicated single-operator fixtures.** The 2026-11-18 run validated the provider path and standalone signed receipt. The 2026-11-20 run added a real private-GHCR, kind, stdio MCP, OpenBao five-file package export and independent consumer allow/deny. There is still no provider/runtime matrix, Cosign result, production cluster result, Windows-hosted live-provider result, release-artifact attestation, or independent organizational adoption evidence.
 - **Signed consumption does not remove producer trust.** The consumer validates retained evidence but does not requery upstream providers or reconstruct desired replica counts. A receipt alone does not retain the complete OCI index child list; a package binds the exact index bytes but still relies on the producer's accepted live observations.
 - **Freshness is not one-time replay prevention.** Nonce and age checks require caller-side challenge discipline; the consumer has no replay cache.
 - **Production key operations and remote evidence distribution remain open.** The OpenBao adapter, local package export, and real development integration work, but production TLS, HSM backing, HA, sealing, audit operations, managed-cloud KMS, and authenticated remote package distribution are not implemented or validated.
-- **Windows process-tree cleanup needs platform validation.** The runner assigns a suspended process to a kill-on-close Job Object before resuming it, so descendant processes can be terminated even after their parent exits. Nested jobs require Windows 8, Windows Server 2012, or later. Real Windows CI results must be checked in Actions; the macOS development run does not establish Windows behavior.
+- **Windows CI does not validate a live provider chain.** The runner assigns a suspended process to a kill-on-close Job Object before resuming it, so descendant processes can be terminated even after their parent exits. Nested jobs require Windows 8, Windows Server 2012, or later. [Windows CI](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44789256329) exercises real process-tree termination and package consumption on Python 3.11 through 3.13, but no live GitHub/GHCR/Kubernetes verification has been performed from a Windows verifier host.
 - **Approvals are not attempt-bound.** GitHub's approval history is run-level. Only certified run attempt 1 is supported, and the current run attempt must still be 1 when approval is evaluated; reruns fail with `RUN_ATTEMPT_UNSUPPORTED` rather than inheriting an approval.
 - **Stdout backpressure can impede responsiveness.** Writes and flushes block while `_write_lock` is held, so a stalled client pipe can delay other output. Cancellation is cooperative. Use `serve()` for supported stdio concurrency; direct concurrent in-process `handle()` calls are not a supported substitute.
 - **No admission control or continuous enforcement.** The receipt covers an observation window, and the consumer returns a decision without mutating or blocking workloads. Neither constrains later changes or future Pod image pulls.
