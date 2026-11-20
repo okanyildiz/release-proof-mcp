@@ -53,6 +53,17 @@ def test_descendant_pipes_after_normal_parent_exit_have_bounded_cleanup() -> Non
     assert result.stdout == b"parent-done\n"
     assert time.monotonic() - started < 2.0
 
+    if os.name == "posix":
+        detached_script = (
+            "import subprocess,sys;"
+            "subprocess.Popen([sys.executable,'-c','import time;time.sleep(2)'],start_new_session=True);"
+            "print('parent-done',flush=True)"
+        )
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="did not close"):
+            runner.run([sys.executable, "-c", detached_script])
+        assert time.monotonic() - started < 1.5
+
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_real_process_output_limit_is_enforced(stream: str) -> None:
@@ -92,8 +103,10 @@ def test_real_process_cancellation_terminates_command() -> None:
     assert time.monotonic() - started < 2.0
 
 
-def test_second_reader_start_failure_cleans_up_started_resources(
+@pytest.mark.parametrize("failure_attempt", [1, 2])
+def test_reader_start_failure_cleans_up_started_resources(
     monkeypatch: pytest.MonkeyPatch,
+    failure_attempt: int,
 ) -> None:
     real_popen = subprocess.Popen
     real_start = threading.Thread.start
@@ -106,23 +119,23 @@ def test_second_reader_start_failure_cleans_up_started_resources(
         processes.append(process)
         return process
 
-    def fail_second_start(thread: threading.Thread) -> None:
+    def fail_reader_start(thread: threading.Thread) -> None:
         nonlocal start_attempts
         start_attempts += 1
-        if start_attempts == 2:
+        if start_attempts == failure_attempt:
             raise RuntimeError("reader start failed")
         real_start(thread)
         started_threads.append(thread)
 
     monkeypatch.setattr(subprocess, "Popen", capture_process)
-    monkeypatch.setattr(threading.Thread, "start", fail_second_start)
+    monkeypatch.setattr(threading.Thread, "start", fail_reader_start)
     runner = ProcessRunner(reader_timeout_seconds=0.1, environment={})
 
     with pytest.raises(RuntimeError, match="reader start failed"):
         runner.run([sys.executable, "-c", "import time;time.sleep(30)"])
 
-    assert len(started_threads) == 1
-    assert not started_threads[0].is_alive()
+    assert len(started_threads) == failure_attempt - 1
+    assert all(not thread.is_alive() for thread in started_threads)
     assert processes[0].returncode is not None
     assert processes[0].stdout is not None and processes[0].stdout.closed
     assert processes[0].stderr is not None and processes[0].stderr.closed

@@ -136,6 +136,13 @@ class ProcessRunner:
                 self._bounded_reap(process)
             except Exception:
                 pass
+            streams = (process.stdout, process.stderr)
+            for stream in streams[len(started_threads) :]:
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except (OSError, ValueError):
+                        pass
             self._close_process_streams(process)
             self._join_readers(tuple(started_threads), 0.05)
             raise
@@ -184,7 +191,7 @@ class ProcessRunner:
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 try:
-                    stream.close()
+                    os.close(stream.fileno())
                 except (OSError, ValueError):
                     pass
 

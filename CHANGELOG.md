@@ -9,7 +9,7 @@
 ### Fixed
 
 - Apply the existing strict JSON depth, duplicate-key, UTF-8, and finite-number checks to MCP stdio input on every supported Python version. Deeply nested input now consistently returns JSON-RPC parse error `-32700` instead of depending on the Python JSON decoder's recursion behavior.
-- Close subprocess stream objects rather than only their file descriptors during exception cleanup, so an unstarted reader cannot leave an apparently open buffered stream or a Python 3.13 teardown warning.
+- Explicitly close subprocess stream objects whose reader never started while retaining forced descriptor closure for active readers. This fixes the unclosed buffered stream and Python 3.13 teardown warning without allowing a detached descendant to block cleanup beyond its deadline.
 
 ## 0.1.0 - 2026-11-20
 

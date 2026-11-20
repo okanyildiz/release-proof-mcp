@@ -55,13 +55,13 @@ The package contained exactly `receipt.json`, `manifest.json`, `effective-policy
 
 | Environment | Result |
 | --- | --- |
-| macOS Python 3.11 | `775 passed, 2 skipped` before the two opt-in tests were run separately |
-| macOS Python 3.12 | `775 passed, 2 skipped` before the two opt-in tests were run separately |
-| Docker Linux Python 3.11 | `775 passed, 2 skipped` |
-| Docker Linux Python 3.12 | `775 passed, 2 skipped` after the strict MCP JSON fix |
-| Docker Linux Python 3.13 | `775 passed, 2 skipped` after the strict MCP JSON and stream cleanup fixes |
+| macOS Python 3.11 | `776 passed, 2 skipped` before the two opt-in tests were run separately |
+| macOS Python 3.12 | `776 passed, 2 skipped` before the two opt-in tests were run separately |
+| Docker Linux Python 3.11 | `776 passed, 2 skipped` |
+| Docker Linux Python 3.12 | `776 passed, 2 skipped` after the strict MCP JSON fix |
+| Docker Linux Python 3.13 | `776 passed, 2 skipped` after the strict MCP JSON and stream cleanup fixes |
 
-Python 3.12 and 3.13 exposed a decoder-dependent deeply nested JSON result. The MCP server now applies the common strict JSON parser and depth bound consistently. Python 3.13 also exposed an unstarted-reader stream cleanup defect; subprocess stream objects are now closed explicitly and their closed state is asserted. The complete macOS and Linux suites passed after these fixes.
+Python 3.12 and 3.13 exposed a decoder-dependent deeply nested JSON result. The MCP server now applies the common strict JSON parser and depth bound consistently. Python 3.13 also exposed an unstarted-reader stream cleanup defect. Streams whose reader never started are closed explicitly, while active readers retain forced descriptor closure so a detached descendant cannot block cleanup past its deadline. Both stream closure and the detached-writer deadline have regressions. The complete macOS and Linux suites passed after these fixes.
 
 ## Tool versions and integrity
 

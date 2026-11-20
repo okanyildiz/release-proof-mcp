@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-775%20passed-14b8a6?style=for-the-badge" alt="Tests: 775 passed"></a>
+  <a href="#tests-and-verification"><img src="https://img.shields.io/badge/tests-776%20passed-14b8a6?style=for-the-badge" alt="Tests: 776 passed"></a>
   <a href="pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
@@ -529,7 +529,7 @@ See [SECURITY.md](SECURITY.md) for the reporting process and operational recomme
 
 ## Tests and verification
 
-The current offline suite reports **775 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
+The current offline suite reports **776 passed, 2 skipped**. The skipped tests are the opt-in live provider and real OpenBao integration tests; the badge is a test-count badge, not a hosted CI status claim.
 
 ```sh
 python -m pip install '.[test]'
