@@ -432,7 +432,8 @@ def _write_new_file(path: Path, raw: bytes) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags, 0o600)
     try:
-        os.fchmod(descriptor, 0o600)
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
         view = memoryview(raw)
         while view:
             written = os.write(descriptor, view)
@@ -441,7 +442,7 @@ def _write_new_file(path: Path, raw: bytes) -> None:
             view = view[written:]
         os.fsync(descriptor)
         mode = stat.S_IMODE(os.fstat(descriptor).st_mode)
-        if mode != 0o600:
+        if os.name == "posix" and mode != 0o600:
             raise OSError("The package file permissions are invalid.")
     finally:
         os.close(descriptor)

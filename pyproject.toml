@@ -37,6 +37,7 @@ Security = "https://github.com/okanyildiz/release-proof-mcp/security/policy"
 test = ["pytest>=8,<10"]
 
 [project.scripts]
+release-proof = "release_proof_mcp.cli:main"
 release-proof-mcp = "release_proof_mcp.server:main"
 release-proof-verify = "release_proof_mcp.consumer_cli:main"
 

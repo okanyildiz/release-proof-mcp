@@ -2,10 +2,10 @@
 
 ## Independent version contracts
 
-- Package: `release-proof-mcp` uses Semantic Versioning (SemVer) and the current release is `0.1.1`. `release_proof_mcp.__version__`, package metadata, and MCP `serverInfo.version` share the package version.
+- Package: `release-proof-mcp` uses Semantic Versioning (SemVer). The current release is `0.1.1` and the development version is `0.1.2`. `release_proof_mcp.__version__`, package metadata, and MCP `serverInfo.version` share the package version.
 - MCP protocol: `2025-06-18`, versioned independently of the package and evidence contracts.
 - Policy: `release-proof-policy/v1`, versioned independently.
-- Receipt: `release-deployment-proof/v2`, implemented and emitted. Unsigned local receipts are the default; configured MCP signing adds an in-toto Statement and DSSE Ed25519 proof. The [v2 JSON Schema](src/release_proof_mcp/schemas/receipt-v2.json) defines the concrete shape, and the [sanitized golden receipt](tests/fixtures/receipt-v2.golden.json) illustrates it.
+- Receipt: `release-deployment-proof/v2`, implemented and emitted. Unsigned local receipts are the default; configured MCP signing adds an in-toto Statement and DSSE Ed25519 proof. The [v2 JSON Schema](src/release_proof_mcp/schemas/receipt-v2.json) defines the concrete shape, and the [sanitized golden receipt](tests/fixtures/receipt-v2.golden.json) illustrates it. Optional `evidence.excluded_terminal_pods` is additive and records first-snapshot terminal owned Pods excluded from active rollout evaluation. Older consumers with the closed schema can reject receipts containing this field, so producers and consumers must be upgraded together when terminal exclusions are present.
 - Evidence package manifest: `release-proof-evidence-package/v1`, versioned independently. Its optional v2 receipt descriptor is additive; ordinary v2 receipts are unchanged. A descriptor-bearing receipt requires the exact five-file package during consumer verification.
 
 ## Receipt v2 breaking changes
@@ -26,9 +26,11 @@ The consumer's freshness contract combines nonce equality with consumer-side tim
 
 `release-proof-verify` returns 0 for allow, 1 for deny, and 2 for input/usage errors. Receipt, expectation, and public-key inputs are each limited to 2 MiB; strict JSON rejects duplicate keys, nonfinite numbers, and excessive nesting. Packages use the documented per-file and total bounds and exact five-file set. These behaviors are part of the consumer interface.
 
+`release-proof capture` returns 0 only for a verified receipt with empty `evidence_truncation`, returns 1 for failed, unknown, or verified truncated receipts, and returns 2 for usage, configuration, export, output, or internal errors. An output failure after package publication triggers validated rollback of only the newly published package. If that cleanup also fails, exit 2 identifies where the evidence may remain instead of claiming that no receipt exists. Diagnostics distinguish pre-output errors from output attempts because partial writes or a flush failure after a complete write can leave receipt output even after successful rollback.
+
 ## Reason codes
 
-Adding a reason code is additive and may occur within an existing policy or receipt contract version. Removing or renaming a code, or changing its meaning, is breaking and requires a new contract version. Consumers must handle unrecognized codes without treating them as success.
+Adding a reason code is additive and may occur within an existing policy or receipt contract version. `REPOSITORY_NOT_VISIBLE` is additive unknown coverage: a repository visibility probe failed or did not match the requested repository under the documented case-insensitive repository-name comparison, so later absence cannot be conclusive. Probe failures preserve their actual reason across dependent checks. Removing or renaming a code, or changing its meaning, is breaking and requires a new contract version. Consumers must handle unrecognized codes without treating them as success.
 
 ## Python and dependencies
 

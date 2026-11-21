@@ -71,8 +71,8 @@ Python 3.12 and 3.13 exposed a decoder-dependent deeply nested JSON result. The 
 
 ## Remaining limits
 
-- This is not a native Windows result. Windows process cleanup still requires a real Windows runner.
-- GitHub-hosted CI and build-provenance attestation for release artifacts remain blocked by the account billing restriction. No hosted CI or attested-release success is claimed.
+- This fixture is not a native Windows result. Subsequent [Windows CI coverage](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44789256329) exercised real process-tree containment and package consumption without changing this fixture's evidence scope.
+- This fixture predates public hosted CI, which was then blocked by the account billing restriction. The subsequent [nine-job public CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44789256329) passed. No release-artifact attestation is claimed.
 - OpenBao used insecure loopback development mode and a local test credential. Production TLS, Kubernetes workload authentication, sealing, HA, audit reliability, backup/restore, HSM custody, and managed KMS remain unvalidated.
 - The local kind observation used a development kubeconfig. It does not add new production RBAC evidence.
 - No Cosign result, managed Kubernetes distribution, production cluster, provider matrix, or independent organizational adoption result is claimed.
