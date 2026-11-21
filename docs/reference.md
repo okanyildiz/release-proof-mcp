@@ -9,11 +9,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/okanyildiz/release-proof-mcp/actions/runs/44796240654"><img src="https://github.com/okanyildiz/release-proof-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/okanyildiz/release-proof-mcp/actions/runs/44902923497"><img src="https://github.com/okanyildiz/release-proof-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="../pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776ab?style=for-the-badge" alt="Python 3.11+"></a>
   <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-5eead4?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8b5cf6?style=for-the-badge" alt="MCP stdio server"></a>
-  <a href="../pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.1-a78bfa?style=for-the-badge" alt="Release version 0.1.1"></a>
+  <a href="../pyproject.toml"><img src="https://img.shields.io/badge/release-v0.1.2-a78bfa?style=for-the-badge" alt="Release version 0.1.2"></a>
 </p>
 
 <p align="center">
@@ -532,7 +532,7 @@ Digest-pinned deployment remains important: this receipt does not constrain a la
 
 The tool has no deploy, mutate, approve, remediate, or admission operation. External commands are evidence reads and verifiers: GitHub API/attestation commands, `crane digest`/`manifest`, Kubernetes version/get commands, and optional `cosign verify`.
 
-Commands use argument vectors with `shell=False`, a 30-second default per-command cap, a 120-second overall deadline, bounded output, process-group termination, and cooperative cancellation. The stdio loop drains and rejects frames over 1 MiB, limits tool calls to four concurrent workers, and rejects duplicate in-flight IDs. Serialized receipts over 512 KiB are rejected instead of returned as evidence claims.
+Commands use argument vectors with `shell=False`, a 30-second default per-command cap, a 120-second overall deadline, bounded output, process-group termination, and cooperative cancellation. POSIX readers own detached raw descriptors, use bounded readiness polling, and close them after EOF or an internal stop request; the coordinator does not close a descriptor still owned by a reader. Windows retains its separate Job Object and buffered-reader cleanup path. The stdio loop drains and rejects frames over 1 MiB, limits tool calls to four concurrent workers, and rejects duplicate in-flight IDs. Serialized receipts over 512 KiB are rejected instead of returned as evidence claims.
 
 ### Credentials and privacy
 
@@ -554,7 +554,7 @@ See [SECURITY.md](../SECURITY.md) for the reporting process and operational reco
 
 ## Tests and verification
 
-The local macOS offline suite reports **861 passed, 3 skipped**. Windows CI reports **859 passed, 5 skipped** on each supported Python version. Two skipped tests are the opt-in live provider and real OpenBao integration tests; the others are platform- or capability-specific. The [nine-job hosted CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44832838349) passed, and the badge links to hosted CI status.
+The local macOS offline suite reports **863 passed, 4 skipped**. Windows CI reports **859 passed, 8 skipped** on each supported Python version. Two skipped tests are the opt-in live provider and real OpenBao integration tests; the others are platform- or capability-specific. The [nine-job hosted CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44911333260) passed, and the badge links to hosted CI status.
 
 ```sh
 python -m pip install '.[test]'

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -96,6 +97,118 @@ def test_descendant_pipes_after_normal_parent_exit_have_bounded_cleanup() -> Non
         assert time.monotonic() - started < 1.5
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX descriptor ownership")
+def test_detached_reader_cannot_close_a_reused_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trigger = tmp_path / "release-child"
+    release_close = threading.Event()
+    real_popen = subprocess.Popen
+    real_start = threading.Thread.start
+    original_descriptors: list[int] = []
+    readers: list[threading.Thread] = []
+
+    class GatedReader(io.BufferedReader):
+        def close(self) -> None:
+            if threading.current_thread() in readers:
+                release_close.wait(timeout=2)
+            super().close()
+
+    def capture_process(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        process = real_popen(*args, **kwargs)
+        assert process.stdout is not None and process.stderr is not None
+        original_descriptors.extend([process.stdout.fileno(), process.stderr.fileno()])
+        for name in ("stdout", "stderr"):
+            stream = getattr(process, name)
+            setattr(process, name, GatedReader(stream.detach()))
+        return process
+
+    def capture_start(thread: threading.Thread) -> None:
+        real_start(thread)
+        readers.append(thread)
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    monkeypatch.setattr(threading.Thread, "start", capture_start)
+    child_script = (
+        "import os,sys,time\n"
+        "while not os.path.exists(sys.argv[1]): time.sleep(0.01)"
+    )
+    script = (
+        "import subprocess,sys;"
+        f"subprocess.Popen([sys.executable,'-c',{child_script!r},{str(trigger)!r}],start_new_session=True);"
+        "print('parent-done',flush=True)"
+    )
+    runner = ProcessRunner(timeout_seconds=2, reader_timeout_seconds=0.05, environment={})
+    sentinels: list[int] = []
+    try:
+        with pytest.raises(RuntimeError, match="did not close"):
+            runner.run([sys.executable, "-c", script])
+
+        assert len(original_descriptors) == 2
+        for descriptor in original_descriptors:
+            source = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(source, descriptor, inheritable=False)
+            if source != descriptor:
+                os.close(source)
+            sentinels.append(descriptor)
+        trigger.touch()
+        release_close.set()
+        for thread in readers:
+            thread.join(timeout=1)
+        assert all(not thread.is_alive() for thread in readers)
+        for descriptor in sentinels:
+            assert os.fstat(descriptor) is not None
+    finally:
+        trigger.touch()
+        release_close.set()
+        for thread in readers:
+            thread.join(timeout=1)
+        for descriptor in sentinels:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX reader stop request")
+def test_bounded_reader_stops_and_closes_its_owned_descriptor() -> None:
+    from release_proof_mcp.runner import _BoundedReader
+
+    read_descriptor, write_descriptor = os.pipe()
+    stop_event = threading.Event()
+    reader = _BoundedReader(
+        os.fdopen(read_descriptor, "rb", buffering=0),
+        128,
+        stop_event=stop_event,
+    )
+    thread = threading.Thread(target=reader.read)
+    try:
+        thread.start()
+        time.sleep(0.02)
+        stop_event.set()
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert reader.stream.closed
+    finally:
+        stop_event.set()
+        thread.join(timeout=1)
+        if not reader.stream.closed:
+            reader.stream.close()
+        os.close(write_descriptor)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux /proc descriptor count")
+def test_no_descriptor_leak_across_one_thousand_commands() -> None:
+    before = len(os.listdir("/proc/self/fd"))
+    runner = ProcessRunner(environment={})
+
+    for _ in range(1000):
+        result = runner.run([sys.executable, "-c", "pass"])
+        assert result.returncode == 0
+
+    assert len(os.listdir("/proc/self/fd")) == before
+
+
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 def test_real_process_output_limit_is_enforced(stream: str) -> None:
     descriptor = 1 if stream == "stdout" else 2
@@ -139,16 +252,25 @@ def test_reader_start_failure_cleans_up_started_resources(
     monkeypatch: pytest.MonkeyPatch,
     failure_attempt: int,
 ) -> None:
+    from release_proof_mcp import runner as runner_module
+
     real_popen = subprocess.Popen
     real_start = threading.Thread.start
+    real_reader_type = runner_module._BoundedReader
     processes: list[subprocess.Popen[bytes]] = []
     started_threads: list[threading.Thread] = []
+    captured_readers = []
     start_attempts = 0
 
     def capture_process(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         process = real_popen(*args, **kwargs)
         processes.append(process)
         return process
+
+    def capture_reader(*args: object, **kwargs: object):
+        reader = real_reader_type(*args, **kwargs)
+        captured_readers.append(reader)
+        return reader
 
     def fail_reader_start(thread: threading.Thread) -> None:
         nonlocal start_attempts
@@ -160,6 +282,7 @@ def test_reader_start_failure_cleans_up_started_resources(
 
     monkeypatch.setattr(subprocess, "Popen", capture_process)
     monkeypatch.setattr(threading.Thread, "start", fail_reader_start)
+    monkeypatch.setattr(runner_module, "_BoundedReader", capture_reader)
     runner = ProcessRunner(reader_timeout_seconds=0.1, environment={})
 
     with pytest.raises(RuntimeError, match="reader start failed"):
@@ -168,8 +291,12 @@ def test_reader_start_failure_cleans_up_started_resources(
     assert len(started_threads) == failure_attempt - 1
     assert all(not thread.is_alive() for thread in started_threads)
     assert processes[0].returncode is not None
-    assert processes[0].stdout is not None and processes[0].stdout.closed
-    assert processes[0].stderr is not None and processes[0].stderr.closed
+    if os.name == "posix":
+        assert len(captured_readers) == failure_attempt
+        assert all(reader.stream.closed for reader in captured_readers)
+    else:
+        assert processes[0].stdout is not None and processes[0].stdout.closed
+        assert processes[0].stderr is not None and processes[0].stderr.closed
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Object startup")

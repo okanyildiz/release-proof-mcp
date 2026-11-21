@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Give every POSIX subprocess output descriptor one owner. Detached buffered wrappers no longer close raw descriptors, readers use bounded readiness polling and an internal stop event, and forced cleanup cannot damage descriptors reused by later commands. Windows retains its separate Job Object and buffered-reader cleanup path.
+
 ## 0.1.2 - 2026-11-21
 
 ### Added
@@ -33,7 +39,7 @@
 
 ### Release evidence notes
 
-- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their checksum files provide integrity checks, not GitHub build-provenance attestations. The first workflow-built public release is planned for `0.1.2`.
+- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their checksum files provide integrity checks, not GitHub build-provenance attestations. The first workflow-built public release is `0.1.2`; its wheel, sdist, and checksum file have build-provenance attestations.
 
 ## 0.1.1 - 2026-11-20
 
