@@ -33,7 +33,7 @@
 
 ### Release evidence notes
 
-- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their checksum files provide integrity checks, not GitHub build-provenance attestations. The first workflow-built public release is planned for `0.1.2`.
+- The `0.1.0` and `0.1.1` wheel and sdist artifacts were built locally and are unattested. Their checksum files provide integrity checks, not GitHub build-provenance attestations. The first workflow-built public release is `0.1.2`; its wheel, sdist, and checksum file have build-provenance attestations.
 
 ## 0.1.1 - 2026-11-20
 
