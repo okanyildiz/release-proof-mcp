@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import os
 import re
+import select
 import signal
 import subprocess
 import sys
@@ -102,6 +104,7 @@ class ProcessRunner:
 
         readers: list[_BoundedReader] = []
         started_threads: list[threading.Thread] = []
+        stop_event = threading.Event()
         job: WindowsJob | None = None
         try:
             if os.name == "nt":
@@ -114,7 +117,11 @@ class ProcessRunner:
             assert process.stdout is not None
             assert process.stderr is not None
             for stream in (process.stdout, process.stderr):
-                reader = _BoundedReader(stream, self.output_limit_bytes)
+                if os.name == "posix":
+                    stream = stream.detach()
+                reader = _BoundedReader(
+                    stream, self.output_limit_bytes, stop_event=stop_event
+                )
                 readers.append(reader)
                 thread = threading.Thread(target=reader.read, daemon=True)
                 thread.start()
@@ -123,7 +130,12 @@ class ProcessRunner:
             if cancel_event is not None and cancel_event.is_set():
                 raise CommandCancelled(f"Command was cancelled: {argv[0]}.")
             self._finish_readers(
-                process, tuple(started_threads), tuple(readers), argv[0], job
+                process,
+                tuple(started_threads),
+                tuple(readers),
+                argv[0],
+                job,
+                stop_event,
             )
             stdout_reader, stderr_reader = readers
             if stdout_reader.truncated or stderr_reader.truncated:
@@ -143,15 +155,15 @@ class ProcessRunner:
                 self._bounded_reap(process)
             except Exception:
                 pass
-            streams = (process.stdout, process.stderr)
-            for stream in streams[len(started_threads) :]:
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except (OSError, ValueError):
-                        pass
-            self._close_process_streams(process)
-            self._join_readers(tuple(started_threads), 0.05)
+            for reader in readers[len(started_threads) :]:
+                try:
+                    reader.close()
+                except (OSError, ValueError):
+                    pass
+            self._close_process_streams(process, stop_event)
+            self._join_readers(
+                tuple(started_threads), self.reader_timeout_seconds
+            )
             raise
         finally:
             if job is not None:
@@ -191,6 +203,7 @@ class ProcessRunner:
         readers: tuple["_BoundedReader", "_BoundedReader"],
         command: str,
         job: WindowsJob | None,
+        stop_event: threading.Event,
     ) -> None:
         if self._join_readers(threads, self.reader_timeout_seconds):
             self._check_reader_errors(readers, command)
@@ -200,19 +213,21 @@ class ProcessRunner:
         if self._join_readers(threads, self.reader_timeout_seconds):
             self._check_reader_errors(readers, command)
             return
-        self._close_process_streams(process)
-        self._join_readers(threads, 0.05)
+        self._close_process_streams(process, stop_event)
+        self._join_readers(threads, self.reader_timeout_seconds)
         raise RunnerError(f"Command output streams did not close within the cleanup deadline: {command}.")
 
     @staticmethod
-    def _close_process_streams(process: subprocess.Popen[bytes]) -> None:
+    def _close_process_streams(
+        process: subprocess.Popen[bytes],
+        stop_event: threading.Event | None = None,
+    ) -> None:
+        if stop_event is not None:
+            stop_event.set()
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 try:
-                    if os.name == "nt":
-                        stream.close()
-                    else:
-                        os.close(stream.fileno())
+                    stream.close()
                 except (OSError, ValueError):
                     pass
 
@@ -275,27 +290,58 @@ class ProcessRunner:
 
 
 class _BoundedReader:
-    def __init__(self, stream: object, limit: int) -> None:
+    def __init__(
+        self,
+        stream: object,
+        limit: int,
+        *,
+        stop_event: threading.Event | None = None,
+    ) -> None:
         self.stream = stream
         self.limit = limit
+        self.stop_event = (
+            stop_event if stop_event is not None else threading.Event()
+        )
         self.data = b""
         self.truncated = False
         self.error: Exception | None = None
+
+    def close(self) -> None:
+        self.stream.close()
 
     def read(self) -> None:
         chunks: list[bytes] = []
         retained = 0
         total = 0
+
+        def retain(chunk: bytes) -> None:
+            nonlocal retained, total
+            total += len(chunk)
+            if retained < self.limit:
+                keep = chunk[: self.limit - retained]
+                chunks.append(keep)
+                retained += len(keep)
+
         try:
-            while True:
-                chunk = self.stream.read1(65536)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if retained < self.limit:
-                    keep = chunk[: self.limit - retained]
-                    chunks.append(keep)
-                    retained += len(keep)
+            if os.name == "posix" and isinstance(self.stream, io.RawIOBase):
+                descriptor = self.stream.fileno()
+                poller = select.poll()
+                poller.register(
+                    descriptor, select.POLLIN | select.POLLHUP | select.POLLERR
+                )
+                while not self.stop_event.is_set():
+                    if not poller.poll(20):
+                        continue
+                    chunk = os.read(descriptor, 65536)
+                    if not chunk:
+                        break
+                    retain(chunk)
+            else:
+                while True:
+                    chunk = self.stream.read1(65536)
+                    if not chunk:
+                        break
+                    retain(chunk)
         except (OSError, ValueError) as error:
             self.error = error
         finally:

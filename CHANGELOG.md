@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Give every POSIX subprocess output descriptor one owner. Detached buffered wrappers no longer close raw descriptors, readers use bounded readiness polling and an internal stop event, and forced cleanup cannot damage descriptors reused by later commands. Windows retains its separate Job Object and buffered-reader cleanup path.
+
 ## 0.1.2 - 2026-11-21
 
 ### Added
