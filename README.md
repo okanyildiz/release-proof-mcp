@@ -54,7 +54,7 @@ Current validation includes:
 - 861 deterministic tests passed locally on macOS with three skips. Windows CI reports 859 passed with five platform- or capability-specific skips on each Python version; two skips on each host are opt-in live tests.
 - Real single-operator live runs covering GitHub, GHCR, kind, OpenBao Transit, a signed standalone receipt, and a five-file package with independent offline allow/deny behavior.
 - The [nine-job GitHub Actions CI matrix](https://github.com/okanyildiz/release-proof-mcp/actions/runs/44832838349) passed on Linux, macOS, and Windows with Python 3.11, 3.12, and 3.13.
-- `v0.1.0` and `v0.1.1` artifacts were built locally and are unattested. `v0.1.2` is prepared for workflow-built, attested artifacts, but no such release is claimed here.
+- `v0.1.0` and `v0.1.1` artifacts were built locally and are unattested. `v0.1.2` uses the tag-driven build and attestation workflow; check the release page for published artifacts and verification status.
 
 These runs do not establish independent organizational adoption, production key custody, production TLS/HA, Cosign interoperability, or a managed-Kubernetes/provider matrix.
 
@@ -70,12 +70,12 @@ These runs do not establish independent organizational adoption, production key 
 
 Python 3.11 or newer is required, with `gh>=2.102.0`, `crane`, and `kubectl`. OpenBao is the built-in non-development CLI signing backend. Cosign is needed only when policy requires it. Programmatic capture also accepts an injected `ReceiptSigner`.
 
-This pre-release preview pins the reviewed commit containing the producer CLI. It is not a signed or attested release. Before the public release, replace this with the release instructions:
+For the source-based `v0.1.2` release, clone the repository and select the release tag:
 
 ```sh
 git clone https://github.com/okanyildiz/release-proof-mcp.git
 cd release-proof-mcp
-git checkout 5d85fef350f1aa539c63e795a6acbf4752fa562d
+git checkout v0.1.2
 python3.11 -m venv .venv
 . .venv/bin/activate
 pip install .
